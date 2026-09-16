@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "pnpm --filter @firewood/h5 dev",
     "build": "pnpm --filter @firewood/h5 build",
-    "typecheck": "pnpm -r --if-present typecheck"
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test"
   },
   "engines": {
     "node": ">=20"

@@ -13,7 +13,8 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --test src/resolve-chop.test.ts"
   },
   "devDependencies": {
     "typescript": "^5.8.2"

@@ -11,27 +11,42 @@
   </head>
   <body>
     <div id="app">
-      <canvas id="scene" aria-label="Firewood Lab preview"></canvas>
+      <canvas id="scene" aria-label="Firewood Lab"></canvas>
+      <div id="flash" class="flash" aria-hidden="true"></div>
+
+      <div class="top-bar">
+        <div class="brand-mini">Firewood Lab</div>
+        <p id="phase-hint" class="phase-hint">点击木头瞄准落点</p>
+      </div>
+
       <div class="hud">
-        <header class="brand">
-          <h1>Firewood Lab</h1>
-          <p>劈柴力道演示 · resolveChop</p>
-        </header>
         <label class="row">
           <span>树种</span>
           <select id="species"></select>
         </label>
+        <p id="species-meta" class="meta"></p>
+
         <label class="row">
           <span>斧头</span>
           <select id="axe"></select>
         </label>
-        <label class="row">
-          <span>力道</span>
-          <input id="slider" type="range" min="0" max="100" value="50" />
-          <output id="slider-value">0.50</output>
-        </label>
+        <p id="axe-meta" class="meta"></p>
+
+        <div id="power-panel" class="power-panel is-disabled" aria-disabled="true">
+          <label class="row">
+            <span>力道</span>
+            <input id="slider" type="range" min="0" max="100" value="50" />
+            <output id="slider-value">0.50</output>
+          </label>
+          <div class="actions">
+            <button type="button" id="chop-btn" class="btn primary">劈下去</button>
+            <button type="button" id="reset-aim-btn" class="btn ghost">重瞄</button>
+          </div>
+        </div>
+
         <p class="result" id="result">—</p>
-        <p class="tip" id="tip"></p>
+        <p class="tip" id="tip">选好树种与斧头，然后点木头瞄准。</p>
+        <button type="button" id="again-btn" class="btn again is-hidden">再来一斧</button>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

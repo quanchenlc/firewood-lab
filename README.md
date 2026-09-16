@@ -9,13 +9,14 @@ pnpm install
 pnpm --filter @firewood/h5 dev
 ```
 
-浏览器打开终端提示的本地地址（默认 `http://localhost:5173`）。页面包含简易 Three.js 场景，以及 `resolveChop` 力道演示（`too_light` / `sweet` / `too_heavy`）。
+浏览器打开终端提示的本地地址（默认 `http://localhost:5173`）。玩法循环：选树种/斧头 → **点击木头瞄准** → 调力道 → **按住「劈下去」松手** → 看 `too_light` / `sweet` / `too_heavy`；sweet 时木头会粗分成两半（非 Voronoi）。
 
 其他常用命令：
 
 ```bash
 pnpm --filter @firewood/h5 build
 pnpm typecheck
+pnpm test
 ```
 
 需要 Node.js ≥ 20，包管理器使用 pnpm（见根目录 `packageManager` 字段）。
