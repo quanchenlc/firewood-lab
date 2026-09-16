@@ -420,6 +420,21 @@ async function boot(): Promise<void> {
   updateForceUi();
   setPhase('aim');
 
+  // Test hook for automated feel verification (dev / local only).
+  (window as unknown as { __fwTest?: object }).__fwTest = {
+    getPhase: () => phase,
+    getRhythm: () => rhythm01,
+    setRhythm: (v: number) => {
+      rhythm01 = Math.min(1, Math.max(0, v));
+      rhythmPhase = Math.asin(Math.max(-1, Math.min(1, (rhythm01 - 0.5) * 2)));
+      updateForceUi();
+    },
+    doChop: () => doChop(),
+    reset: () => resetRound(),
+    outcomePreview: () =>
+      resolveChop({ slider01: rhythm01, species: currentSpecies(), axe: currentAxe() }),
+  };
+
   function frame(now: number): void {
     requestAnimationFrame(frame);
     if (tabHidden) {
