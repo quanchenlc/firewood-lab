@@ -341,10 +341,13 @@ export function createFractureWorld(): FractureWorld {
       let side = Math.sign(offset.dot(planeNormal));
       if (side === 0) side = i % 2 === 0 ? 1 : -1;
 
-      // Keep upright — tiny tip only (readable crack, no tumble / hover).
-      const tip = plan.messy ? 0.02 : 0.01;
-      body.quaternion.setFromEuler(planeNormal.z * side * tip, 0, -planeNormal.x * side * tip);
-      fragment.quaternion.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w);
+      // Keep slice orientation as-is (Y-up cylinder halves stay upright on the stump).
+      body.quaternion.set(
+        fragment.quaternion.x,
+        fragment.quaternion.y,
+        fragment.quaternion.z,
+        fragment.quaternion.w,
+      );
 
       // Snap bottoms onto the stump top so halves sit on the block.
       fragment.updateMatrixWorld(true);
@@ -357,8 +360,8 @@ export function createFractureWorld(): FractureWorld {
       const baseY = body.position.y;
       const baseZ = body.position.z;
 
-      // Target crack width — messy gets a bit wider / secondary nick offset.
-      const toGap = plan.wedgeGap * (plan.messy ? 1.25 + (i > 1 ? 0.35 : 0) : 1);
+      // Tight crack — later pieces in a messy split stay in the same cluster.
+      const toGap = plan.wedgeGap * (plan.messy && i > 1 ? 1.15 : 1);
 
       // Start nearly closed; animate open so it feels like a settle, not a teleport.
       const fromGap = Math.min(0.004, toGap * 0.12);

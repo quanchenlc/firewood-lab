@@ -46,9 +46,9 @@ export interface FracturePlan {
 }
 
 const SWEET_PIECES = 2;
-const HEAVY_BASE = 5;
-const MAX_FRAGMENTS = 8;
-const WEAK_CAP = 6;
+const HEAVY_BASE = 3;
+const MAX_FRAGMENTS = 4;
+const WEAK_CAP = 3;
 const MIN_RECHOP = 2;
 
 /** Soft cap on simultaneous physics fragments in the scene. */
@@ -97,7 +97,6 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
   }
 
   const weight = axe?.weight ?? 0.5;
-  const edge = axe?.edge ?? 0.6;
   const genScale = generation <= 0 ? 1 : generation === 1 ? 0.7 : 0.5;
 
   const messy = outcome === 'too_heavy';
@@ -105,24 +104,25 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
   if (!messy) {
     fragmentCount = SWEET_PIECES;
   } else {
-    let base = Math.round(HEAVY_BASE * (0.9 + 0.2 * weight + 0.1 * edge) * genScale);
+    // Reference: even heavy/multi chops stay as upright wedges in a cluster —
+    // prefer one extra nick over a fireworks piece dump.
+    let base = Math.round(HEAVY_BASE * (0.95 + 0.15 * weight) * genScale);
     const cap = weakDevice ? WEAK_CAP : MAX_FRAGMENTS;
-    // Keep heavy chops directional but tighter — more nicks, not a floor dump.
-    fragmentCount = clampInt(base, generation > 0 ? MIN_RECHOP : 3, Math.min(cap, 5));
+    fragmentCount = clampInt(base, generation > 0 ? MIN_RECHOP : 2, Math.min(cap, 3));
   }
 
-  // Tiny lateral nudge only — halves part a crack, stay on the block.
+  // Tiny lateral nudge — ~8–12% of log diameter total crack (screen.toys feel).
   const impulse =
-    outcome === 'too_heavy' ? 0.14 + weight * 0.08 : 0.08 + weight * 0.04;
-  // Visible crack width in world units — slight parting, still “together on the block”.
+    outcome === 'too_heavy' ? 0.06 + weight * 0.04 : 0.04 + weight * 0.02;
   const wedgeGap =
-    outcome === 'too_heavy' ? 0.038 + weight * 0.015 : 0.022 + weight * 0.01;
+    outcome === 'too_heavy' ? 0.03 + weight * 0.01 : 0.02 + weight * 0.008;
 
   return {
     fragmentCount,
-    impulse: impulse * (generation > 0 ? 0.7 : 1),
-    wedgeGap: wedgeGap * (generation > 0 ? 0.75 : 1),
-    impactRadius: outcome === 'too_heavy' ? 0.28 : 0.2,
+    impulse: impulse * (generation > 0 ? 0.65 : 1),
+    // Later chops open even less so the cluster stays tight on the stump.
+    wedgeGap: wedgeGap * (generation > 0 ? 0.55 : 1),
+    impactRadius: outcome === 'too_heavy' ? 0.24 : 0.18,
     nickOnly: false,
     messy,
     splitStyle: messy ? 'cleave_messy' : 'cleave',

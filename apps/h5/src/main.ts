@@ -113,6 +113,8 @@ async function boot(): Promise<void> {
   let chopping = false;
   let impactTimer: number | null = null;
   let phaseTimer: number | null = null;
+  let resultFadeTimer: number | null = null;
+  let hudLean = false;
 
   function clearChopTimers(): void {
     if (impactTimer !== null) {
@@ -122,6 +124,10 @@ async function boot(): Promise<void> {
     if (phaseTimer !== null) {
       window.clearTimeout(phaseTimer);
       phaseTimer = null;
+    }
+    if (resultFadeTimer !== null) {
+      window.clearTimeout(resultFadeTimer);
+      resultFadeTimer = null;
     }
   }
 
@@ -140,24 +146,26 @@ async function boot(): Promise<void> {
       next === 'aim' && logScene.fracture.fragments.length === 0 && !lastOutcome,
     );
 
-    phaseHint.classList.toggle('is-soft', next === 'aim' && !lastOutcome);
-    if (next === 'aim') {
+    // After the first chop cycle, fade instructional chrome (screen.toys lean HUD).
+    if (hudLean) {
+      phaseHint.classList.add('is-gone');
+      phaseHint.textContent = '';
+    } else if (next === 'aim') {
+      phaseHint.classList.remove('is-gone');
+      phaseHint.classList.add('is-soft');
       phaseHint.textContent = logScene.fracture.fragments.some((f) => f.splittable)
-        ? '点剩余木块继续，或重置'
-        : '点木头开始';
+        ? '点剩余木块继续'
+        : '拖动旋转 · 点木头开始';
       if (!lastOutcome) {
         resultEl.textContent = '';
         resultEl.className = 'result is-soft';
       }
     } else if (next === 'power') {
-      phaseHint.textContent = '指针往返 · 再点一下劈下';
-      phaseHint.classList.remove('is-soft');
-    } else if (lastOutcome === 'sweet') {
-      phaseHint.textContent = '顺着劈面轻轻分开';
-    } else if (lastOutcome === 'too_heavy') {
-      phaseHint.textContent = '缝更大一点，但仍在桩上';
+      phaseHint.classList.remove('is-gone', 'is-soft');
+      phaseHint.textContent = '再点一下劈下';
     } else {
-      phaseHint.textContent = '斧头回弹 · 再瞄一次';
+      phaseHint.classList.add('is-gone');
+      phaseHint.textContent = '';
     }
     updateForceUi();
   }
@@ -175,9 +183,10 @@ async function boot(): Promise<void> {
   }
 
   function updateForcePreview(): void {
+    // Kept for a11y only — visually hidden to match lean reference HUD.
     if (phase !== 'power') {
       forcePreview.textContent = '再点一下劈下';
-      forcePreview.className = 'force-preview is-idle';
+      forcePreview.className = 'force-preview is-idle sr-only';
       return;
     }
     const outcome = resolveChop({
@@ -186,7 +195,7 @@ async function boot(): Promise<void> {
       axe: currentAxe(),
     });
     forcePreview.textContent = previewLabels[outcome];
-    forcePreview.className = `force-preview ${outcome}`;
+    forcePreview.className = `force-preview sr-only ${outcome}`;
   }
 
   function updateForceUi(): void {
@@ -253,8 +262,14 @@ async function boot(): Promise<void> {
     const axe = currentAxe();
     const outcome = resolveChop({ slider01: lockedSlider01, species: sp, axe });
     lastOutcome = outcome;
+    hudLean = true;
     resultEl.textContent = labels[outcome];
     resultEl.className = `result ${outcome}`;
+    if (resultFadeTimer !== null) window.clearTimeout(resultFadeTimer);
+    resultFadeTimer = window.setTimeout(() => {
+      resultFadeTimer = null;
+      resultEl.classList.add('is-fading');
+    }, 1100);
     const target = aimTarget;
     const point = aimPoint.clone();
     const generation = aimGeneration;
@@ -308,6 +323,8 @@ async function boot(): Promise<void> {
     aimTarget = null;
     aimGeneration = 0;
     lastOutcome = null;
+    hudLean = false;
+    phaseHint.classList.remove('is-gone');
     logScene.resetLog();
     void logScene.setSpecies(currentSpecies());
     setPhase('aim');

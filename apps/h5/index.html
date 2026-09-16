@@ -23,10 +23,8 @@
         </div>
       </div>
 
-      <div class="top-bar">
-        <div class="brand-mini">Firewood Lab</div>
-        <p id="phase-hint" class="phase-hint is-soft">点木头开始</p>
-      </div>
+      <!-- Tiny rest hint — fades once chopping starts (screen.toys-style lean HUD) -->
+      <p id="phase-hint" class="phase-hint is-soft">拖动旋转 · 点木头开始</p>
 
       <!-- Edge chips: collapsed until tapped -->
       <div id="species-chip" class="edge-chip edge-chip--left" data-open="false">
@@ -60,11 +58,13 @@
           <div id="sweet-zone" class="sweet-zone" aria-hidden="true"></div>
           <div id="rhythm-knob" class="rhythm-knob" aria-hidden="true"></div>
         </div>
-        <p id="force-preview" class="force-preview is-idle">再点一下劈下</p>
+        <p id="force-preview" class="force-preview is-idle sr-only">再点一下劈下</p>
       </div>
 
       <p class="result is-soft" id="result" aria-live="polite"></p>
       <button type="button" id="again-btn" class="again-fab is-hidden" aria-label="再来一斧">↺</button>
+
+      <p class="credits" aria-hidden="true">Firewood Lab · Poly Haven CC0</p>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -23,7 +23,7 @@ describe('planFracture', () => {
     assert.equal(p.splitStyle, 'cleave');
     assert.ok(p.impulse > 0);
     assert.ok(p.impulse < 0.35, 'sweet impulse stays a wedged nudge, not a burst');
-    assert.ok(p.wedgeGap > 0.015 && p.wedgeGap < 0.06);
+    assert.ok(p.wedgeGap > 0.012 && p.wedgeGap < 0.05);
   });
 
   it('too_heavy is messier with more fragments than sweet, still cleave', () => {
@@ -36,7 +36,7 @@ describe('planFracture', () => {
     assert.equal(heavy.messy, true);
     assert.equal(heavy.splitStyle, 'cleave_messy');
     assert.ok(heavy.impulse < 0.45, 'heavy still not a fireworks dump');
-    assert.ok(heavy.fragmentCount <= 5);
+    assert.ok(heavy.fragmentCount <= 3);
   });
 
   it('weakDevice caps fragment count', () => {
