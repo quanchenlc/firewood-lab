@@ -10,9 +10,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@dgreenheck/three-pinata": "^2.0.1",
     "@firewood/content": "workspace:*",
     "@firewood/game-core": "workspace:*",
     "@firewood/platform": "workspace:*",
+    "cannon-es": "^0.20.0",
     "three": "^0.174.0"
   },
   "devDependencies": {

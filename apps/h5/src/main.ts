@@ -1,14 +1,22 @@
 import './style.css';
 import * as THREE from 'three';
-import { resolveChop, type Axe, type ChopOutcome, type Species } from '@firewood/game-core';
+import { DestructibleMesh } from '@dgreenheck/three-pinata';
+import {
+  planFracture,
+  resolveChop,
+  type Axe,
+  type ChopOutcome,
+  type Species,
+} from '@firewood/game-core';
 import { axes, species } from '@firewood/content';
 import { createH5Platform } from '@firewood/platform';
+import { detectWeakDevice } from './fracture-world';
 import { createLogScene, tintLog } from './log-scene';
 
 type Phase = 'aim' | 'power' | 'result';
 
 const platform = createH5Platform();
-platform.storage.setItem('firewood.h5.loop', 'aim-power-v1');
+platform.storage.setItem('firewood.h5.loop', 'voronoi-v1');
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
 const flashEl = document.querySelector<HTMLDivElement>('#flash')!;
@@ -32,6 +40,8 @@ const labels: Record<ChopOutcome, string> = {
   too_heavy: 'too_heavy · 力道过猛',
 };
 
+const weakDevice = detectWeakDevice();
+
 for (const s of species) {
   const opt = document.createElement('option');
   opt.value = s.id;
@@ -53,6 +63,8 @@ const pointerNdc = new THREE.Vector2();
 
 let phase: Phase = 'aim';
 let aimPoint: THREE.Vector3 | null = null;
+let aimTarget: DestructibleMesh | null = null;
+let aimGeneration = 0;
 let lastOutcome: ChopOutcome | null = null;
 
 function currentSpecies(): Species {
@@ -70,27 +82,37 @@ function refreshMeta(): void {
   axeMeta.textContent = `重量 ${axe.weight.toFixed(2)} · 精度 ${axe.precision.toFixed(2)} · ${axe.tip}`;
   tipEl.textContent =
     phase === 'aim'
-      ? '点木头瞄准落点；拖动画布可轻微绕转。'
+      ? '点木头（或剩余大块）瞄准；拖动画布可绕转。'
       : phase === 'power'
         ? '调好力道后点「劈下去」（按住再松手也可）。'
-        : lastOutcome
-          ? `${labels[lastOutcome]} — ${sp.tip}`
-          : tipEl.textContent;
+        : lastOutcome === 'too_light'
+          ? '力道太轻，只留下浅痕。加大力道或换斧再试。'
+          : '碎片会落下；可点较大碎块继续劈，或「再来一斧」重置。';
 }
 
 function setPhase(next: Phase): void {
   phase = next;
   powerPanel.classList.toggle('is-disabled', next !== 'power');
   powerPanel.setAttribute('aria-disabled', String(next !== 'power'));
-  againBtn.classList.toggle('is-hidden', next !== 'result');
+  // Keep again visible after first fracture/result so reset is always available
+  againBtn.classList.toggle('is-hidden', next === 'aim' && logScene.fracture.fragments.length === 0);
   if (next === 'aim') {
-    phaseHint.textContent = '点击木头瞄准落点';
-    resultEl.textContent = '—';
-    resultEl.className = 'result';
+    phaseHint.textContent =
+      logScene.fracture.fragments.some((f) => f.splittable)
+        ? '点击剩余木块继续劈，或重置'
+        : '点击木头瞄准落点';
+    if (!lastOutcome) {
+      resultEl.textContent = '—';
+      resultEl.className = 'result';
+    }
   } else if (next === 'power') {
     phaseHint.textContent = '已瞄准 — 调节力道后劈下';
+  } else if (lastOutcome === 'sweet') {
+    phaseHint.textContent = 'Voronoi 劈开了！';
+  } else if (lastOutcome === 'too_heavy') {
+    phaseHint.textContent = '力道过猛，碎得更散';
   } else {
-    phaseHint.textContent = lastOutcome === 'sweet' ? '劈开了！再来一斧？' : '再调整力道，或重瞄再试';
+    phaseHint.textContent = '再调整力道，或重瞄再试';
   }
   refreshMeta();
 }
@@ -115,40 +137,68 @@ function aimAt(clientX: number, clientY: number): boolean {
   pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
   pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointerNdc, logScene.camera);
-  const hits = raycaster.intersectObjects(logScene.raycastables, false);
+  const hits = raycaster.intersectObjects(logScene.getRaycastTargets(), false);
   const hit = hits[0];
   if (!hit) return false;
+
+  const obj = hit.object as DestructibleMesh;
   aimPoint = hit.point.clone();
-  logScene.placeMarker(hit.point, hit.face?.normal.clone().transformDirection(hit.object.matrixWorld) ?? new THREE.Vector3(0, 1, 0));
+  aimTarget = obj;
+  const frag = logScene.findFragment(obj);
+  aimGeneration = frag?.generation ?? (obj.userData.generation as number) ?? 0;
+
+  const normal =
+    hit.face?.normal.clone().transformDirection(hit.object.matrixWorld) ??
+    new THREE.Vector3(0, 1, 0);
+  logScene.placeMarker(hit.point, normal);
   platform.audio.play('aim', { volume: 0.25 });
   setPhase('power');
   return true;
 }
 
 function doChop(): void {
-  if (phase !== 'power' || !aimPoint) return;
+  if (phase !== 'power' || !aimPoint || !aimTarget) return;
   const sp = currentSpecies();
   const axe = currentAxe();
   const outcome = resolveChop({ slider01: slider01(), species: sp, axe });
   lastOutcome = outcome;
   resultEl.textContent = labels[outcome];
   resultEl.className = `result ${outcome}`;
-  tintLog(logScene.logMesh, outcome);
+  tintLog(aimTarget, outcome);
   flash(outcome);
   logScene.punchScale(outcome === 'too_heavy' ? 0.18 : 0.1);
-  logScene.setShake(outcome === 'too_heavy' ? 0.22 : outcome === 'too_light' ? 0.06 : 0.12);
+  logScene.setShake(outcome === 'too_heavy' ? 0.22 : outcome === 'too_light' ? 0.06 : 0.14);
   platform.audio.play(`chop:${outcome}`, { volume: 0.55 });
   platform.storage.setItem('firewood.h5.lastOutcome', outcome);
 
-  if (outcome === 'sweet') {
-    logScene.playSplit(aimPoint);
+  const plan = planFracture({
+    outcome,
+    weakDevice,
+    axe: { weight: axe.weight, edge: axe.edge },
+    generation: aimGeneration,
+  });
+
+  if (plan.nickOnly) {
+    logScene.playNick(aimPoint);
+    logScene.clearMarker();
+  } else {
+    logScene.fractureAt(aimTarget, aimPoint, plan, aimGeneration);
   }
+
+  aimPoint = null;
+  aimTarget = null;
   setPhase('result');
+
+  // After a short beat, allow re-aiming remaining pieces without forcing full reset.
+  window.setTimeout(() => {
+    if (phase === 'result') setPhase('aim');
+  }, 700);
 }
 
-function resetRound(keepOrbit = true): void {
-  void keepOrbit;
+function resetRound(): void {
   aimPoint = null;
+  aimTarget = null;
+  aimGeneration = 0;
   lastOutcome = null;
   logScene.resetLog();
   setPhase('aim');
@@ -165,7 +215,6 @@ axeSelect.addEventListener('change', () => {
 slider.addEventListener('input', updateSliderLabel);
 
 chopBtn.addEventListener('click', () => doChop());
-/** Also support release-to-chop after a short press-hold on the button. */
 let chopPressedAt = 0;
 chopBtn.addEventListener('pointerdown', () => {
   if (phase === 'power') chopPressedAt = performance.now();
@@ -174,7 +223,6 @@ chopBtn.addEventListener('pointerup', () => {
   if (phase !== 'power' || !chopPressedAt) return;
   const held = performance.now() - chopPressedAt;
   chopPressedAt = 0;
-  // Short tap is handled by click; long press (≥180ms) chops on release.
   if (held >= 180) doChop();
 });
 chopBtn.addEventListener('pointercancel', () => {
@@ -182,12 +230,12 @@ chopBtn.addEventListener('pointercancel', () => {
 });
 resetAimBtn.addEventListener('click', () => {
   aimPoint = null;
+  aimTarget = null;
   logScene.clearMarker();
   setPhase('aim');
 });
 againBtn.addEventListener('click', () => resetRound());
 
-/* --- pointer: tap to aim, drag to orbit --- */
 const DRAG_PX = 10;
 let pointerId: number | null = null;
 let downX = 0;
@@ -215,7 +263,7 @@ platform.input.onPointer((sample) => {
     const dx = sample.x - downX;
     const dy = sample.y - downY;
     if (!dragging && Math.hypot(dx, dy) > DRAG_PX) dragging = true;
-    if (dragging && phase !== 'result') {
+    if (dragging) {
       logScene.setOrbit(orbitYaw - dx * 0.005, orbitPitch + dy * 0.004);
     }
     return;

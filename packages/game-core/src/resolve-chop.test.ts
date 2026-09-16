@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { resolveChop } from './index.ts';
+import { resolveChop } from './resolve-chop.ts';
 
 const soft = { hardness: 0.32 };
 const hard = { hardness: 0.78 };
