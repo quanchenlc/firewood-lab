@@ -309,9 +309,9 @@ export function createLogScene(
       if (n) {
         lastCleaveNormal = new THREE.Vector3(n.x, 0, n.z).normalize();
       } else {
-        // Infer from first wedge entry if present.
-        const w = created[0]?.wedge;
-        if (w) lastCleaveNormal = new THREE.Vector3(w.normalX, 0, w.normalZ).normalize();
+        // Infer from first bounce entry if present.
+        const b = created[0]?.bounce;
+        if (b) lastCleaveNormal = new THREE.Vector3(b.normalX, 0, b.normalZ).normalize();
       }
     }
     if (target === logMesh) logMesh.visible = false;

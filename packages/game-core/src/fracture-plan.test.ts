@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { cleaveNormalXZ, isRechopWorthy, planFracture } from './fracture-plan.ts';
+import {
+  BOUNCE_DISTANCE_INCHES,
+  BOUNCE_DURATION_MS,
+  BOUNCE_POP_HEIGHT_INCHES,
+  cleaveNormalXZ,
+  INCH,
+  isFirewoodChip,
+  isRechopWorthy,
+  planFracture,
+} from './fracture-plan.ts';
 
 describe('planFracture', () => {
   it('too_light is nick-only with zero fragments', () => {
@@ -10,9 +19,10 @@ describe('planFracture', () => {
     assert.equal(p.messy, false);
     assert.equal(p.splitStyle, 'nick');
     assert.equal(p.wedgeGap, 0);
+    assert.equal(p.popHeight, 0);
   });
 
-  it('sweet is a clean 2-way directional cleave', () => {
+  it('sweet is a clean 2-way directional cleave with ~1 inch bounce', () => {
     const p = planFracture({
       outcome: 'sweet',
       axe: { weight: 0.5, edge: 0.6 },
@@ -23,7 +33,10 @@ describe('planFracture', () => {
     assert.equal(p.splitStyle, 'cleave');
     assert.ok(p.impulse > 0);
     assert.ok(p.impulse < 0.35, 'sweet impulse stays a wedged nudge, not a burst');
-    assert.ok(p.wedgeGap > 0.018 && p.wedgeGap < 0.06);
+    // Reference: distanceInches=1 → ld=0.0254 m per side
+    assert.ok(Math.abs(p.wedgeGap - BOUNCE_DISTANCE_INCHES * INCH) < 1e-9);
+    assert.ok(Math.abs(p.popHeight - BOUNCE_POP_HEIGHT_INCHES * INCH) < 1e-9);
+    assert.equal(p.bounceMs, BOUNCE_DURATION_MS);
   });
 
   it('too_heavy is messier with more fragments than sweet, still cleave', () => {
@@ -76,5 +89,17 @@ describe('isRechopWorthy', () => {
     assert.equal(isRechopWorthy(0.5, 5), false);
     assert.equal(isRechopWorthy(0.5, 2), true);
     assert.equal(isRechopWorthy(0.5, 0), true);
+  });
+});
+
+describe('isFirewoodChip', () => {
+  it('keeps upright half-log proportions on the stump', () => {
+    // Half cylinder-ish: ~0.4 × 0.7 × 0.4
+    assert.equal(isFirewoodChip(0.4, 0.7, 0.4), false);
+  });
+
+  it('flags tiny chips and pancake flakes as firewood', () => {
+    assert.equal(isFirewoodChip(0.08, 0.05, 0.08), true);
+    assert.equal(isFirewoodChip(0.5, 0.08, 0.4), true);
   });
 });
