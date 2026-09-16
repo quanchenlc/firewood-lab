@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { Axe, Species } from '@firewood/game-core';
+import { assetUrl } from './asset-url';
 
 export type ProgressFn = (ratio: number, label: string) => void;
 
@@ -10,7 +11,7 @@ const gltfLoader = new GLTFLoader();
 function loadTexture(url: string, colorSpace?: THREE.ColorSpace): Promise<THREE.Texture> {
   return new Promise((resolve, reject) => {
     texLoader.load(
-      url,
+      assetUrl(url),
       (tex) => {
         if (colorSpace) tex.colorSpace = colorSpace;
         tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -95,7 +96,7 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
 }
 
 export async function loadGltf(url: string): Promise<THREE.Group> {
-  const gltf = await gltfLoader.loadAsync(url);
+  const gltf = await gltfLoader.loadAsync(assetUrl(url));
   const root = gltf.scene;
   root.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
@@ -132,7 +133,7 @@ export async function preloadContentAssets(
 
   tasks.push(async () => {
     onProgress(0.05, '树桩模型…');
-    stump = await loadGltf('/assets/models/stump/tree_stump_02_1k.gltf');
+    stump = await loadGltf('assets/models/stump/tree_stump_02_1k.gltf');
     normalizeModel(stump, 1.55);
   });
 
@@ -163,7 +164,7 @@ export async function preloadContentAssets(
                 const img = new Image();
                 img.onload = () => resolve();
                 img.onerror = () => reject(new Error(`Failed ${u}`));
-                img.src = u!;
+                img.src = assetUrl(u!);
               }),
           ),
       );

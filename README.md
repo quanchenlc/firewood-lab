@@ -10,7 +10,13 @@ pnpm assets:pull   # 可选：刷新 Poly Haven CC0 资源（已提交 1K 回退
 pnpm --filter @firewood/h5 dev
 ```
 
-浏览器打开终端提示的本地地址（默认 `http://localhost:5173`）。
+开发服务器会挂在 **`http://localhost:5173/firewood-lab/`**（Vite `base` 与 GitHub Pages 一致）。
+
+### GitHub Pages 预览
+
+线上地址：**https://quanchenlc.github.io/firewood-lab/**
+
+首次需要在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**（点一次即可）。之后推送到 `main` 或 `cursor/**` 分支会自动构建并部署 `apps/h5/dist`。
 
 玩法循环：选树种/斧头 → **点击木头瞄准** → 调力道 → **劈下去** →
 
