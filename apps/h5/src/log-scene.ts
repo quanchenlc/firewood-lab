@@ -224,9 +224,13 @@ export function createLogScene(
     const next = await loadSpeciesMaterials(species);
     mats?.dispose();
     mats = next;
-    // Refresh proxy materials if still whole
+    // Rebuild DestructibleMesh so three-pinata keeps mapped outer/inner materials
+    // (private material refs are set at construction time).
     if (logMesh.visible && logMesh.parent && logMesh.userData.role === 'log') {
-      logMesh.material = next.outer;
+      if (logMesh.parent) logMesh.removeFromParent();
+      fracture.disposeMesh(logMesh);
+      logMesh = createLogProxy();
+      scene.add(logMesh);
     }
   }
 
