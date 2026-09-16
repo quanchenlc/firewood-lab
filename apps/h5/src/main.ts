@@ -517,6 +517,24 @@ async function boot(): Promise<void> {
     armLocked: () => armLockedTarget(),
     fragmentCount: () => logScene.fracture.fragments.length,
     splittableCount: () => logScene.fracture.fragments.filter((f) => f.splittable).length,
+    /** Stump-piece horizontal centers + pairwise gap (for bounce/offset checks). */
+    stumpGap: () => {
+      const stump = logScene.fracture.fragments.filter((f) => f.onStump && f.mesh.visible);
+      const centers = stump.map((f) => ({
+        x: f.body.position.x,
+        y: f.body.position.y,
+        z: f.body.position.z,
+        bouncing: !!f.bounce,
+      }));
+      let maxGap = 0;
+      for (let i = 0; i < centers.length; i++) {
+        for (let j = i + 1; j < centers.length; j++) {
+          const d = Math.hypot(centers[i]!.x - centers[j]!.x, centers[i]!.z - centers[j]!.z);
+          if (d > maxGap) maxGap = d;
+        }
+      }
+      return { count: stump.length, centers, maxGap };
+    },
     /** Freeze axe at vertical impact pose over the log (for screenshot tests). */
     freezeAxeImpact: () => logScene.debugFreezeAxeImpact(),
     getAxePose: () => logScene.debugAxePose(),
