@@ -30,6 +30,11 @@ export interface FracturePlan {
   fragmentCount: number;
   /** Lateral split impulse along the cleave-plane normal (not radial burst). */
   impulse: number;
+  /**
+   * World-space half-gap along the cleave normal — pieces nudge apart and
+   * stay mostly wedged on the stump (screen.toys-style), not a physics dump.
+   */
+  wedgeGap: number;
   /** Impact seed concentration radius (local units; used by Voronoi fallback). */
   impactRadius: number;
   /** Whether to leave a shallow nick instead of fracturing. */
@@ -83,6 +88,7 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
     return {
       fragmentCount: 0,
       impulse: 0,
+      wedgeGap: 0,
       impactRadius: 0.12,
       nickOnly: true,
       messy: false,
@@ -101,17 +107,21 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
   } else {
     let base = Math.round(HEAVY_BASE * (0.9 + 0.2 * weight + 0.1 * edge) * genScale);
     const cap = weakDevice ? WEAK_CAP : MAX_FRAGMENTS;
-    fragmentCount = clampInt(base, generation > 0 ? MIN_RECHOP : 4, cap);
+    // Keep heavy chops directional but tighter — more nicks, not a floor dump.
+    fragmentCount = clampInt(base, generation > 0 ? MIN_RECHOP : 3, Math.min(cap, 5));
   }
 
-  // Lateral open — modest so halves fall beside the stump, not firework
+  // Tiny lateral nudge only — halves part a crack, stay on the block.
   const impulse =
-    outcome === 'too_heavy' ? 1.05 + weight * 0.75 : 0.85 + weight * 0.4;
+    outcome === 'too_heavy' ? 0.14 + weight * 0.08 : 0.08 + weight * 0.04;
+  const wedgeGap =
+    outcome === 'too_heavy' ? 0.055 + weight * 0.02 : 0.028 + weight * 0.012;
 
   return {
     fragmentCount,
-    impulse: impulse * (generation > 0 ? 0.75 : 1),
-    impactRadius: outcome === 'too_heavy' ? 0.32 : 0.22,
+    impulse: impulse * (generation > 0 ? 0.7 : 1),
+    wedgeGap: wedgeGap * (generation > 0 ? 0.75 : 1),
+    impactRadius: outcome === 'too_heavy' ? 0.28 : 0.2,
     nickOnly: false,
     messy,
     splitStyle: messy ? 'cleave_messy' : 'cleave',

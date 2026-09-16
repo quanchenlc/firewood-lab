@@ -16,6 +16,8 @@ export interface PhysFragment {
   generation: number;
   splittable: boolean;
   bornAt: number;
+  /** After this timestamp, freeze residual motion so pieces stay wedged on the stump. */
+  settleUntil: number;
 }
 
 export interface FractureWorld {
@@ -129,11 +131,12 @@ export function createFractureWorld(): FractureWorld {
         mesh.quaternion.z,
         mesh.quaternion.w,
       ),
-      linearDamping: 0.42,
-      angularDamping: 0.55,
+      // Heavy damping so a wedged split settles in place instead of tumbling off.
+      linearDamping: 0.78,
+      angularDamping: 0.88,
       allowSleep: true,
-      sleepSpeedLimit: 0.12,
-      sleepTimeLimit: 0.25,
+      sleepSpeedLimit: 0.08,
+      sleepTimeLimit: 0.12,
     });
   }
 
@@ -307,6 +310,7 @@ export function createFractureWorld(): FractureWorld {
   ): PhysFragment[] {
     const created: PhysFragment[] = [];
     const now = performance.now();
+    const settleMs = plan.messy ? 420 : 320;
     const tangent = new THREE.Vector3().crossVectors(up, planeNormal).normalize();
     if (tangent.lengthSq() < 1e-8) tangent.set(0, 0, 1);
 
@@ -314,27 +318,33 @@ export function createFractureWorld(): FractureWorld {
       scene.add(fragment);
       fragment.updateMatrixWorld(true);
 
-      const body = makeBodyFromMesh(fragment, plan.messy ? 0.9 : 1.05);
+      const body = makeBodyFromMesh(fragment, plan.messy ? 1.15 : 1.35);
       const offset = new THREE.Vector3().subVectors(fragment.position, worldImpact);
       let side = Math.sign(offset.dot(planeNormal));
       if (side === 0) side = Math.random() < 0.5 ? 1 : -1;
 
-      const boost = plan.impulse * (plan.messy ? 1.12 : 1);
-      const jitter = plan.messy ? 0.22 : 0.06;
-      const kickUp = plan.messy ? 0.28 : 0.12;
+      // Wedged pose: park halves with a visible crack, mostly still on the stump.
+      const gap = plan.wedgeGap * (plan.messy ? 1 + Math.random() * 0.35 : 1);
+      body.position.x += planeNormal.x * side * gap;
+      body.position.z += planeNormal.z * side * gap;
+      // Keep vertical contact with the block — do not loft into a freefall dump.
+      body.position.y += plan.messy ? 0.012 : 0.006;
+      fragment.position.set(body.position.x, body.position.y, body.position.z);
 
-      // Two-sided lateral impulse along cleave normal — open sideways, then fall
+      const boost = plan.impulse * (plan.messy ? 1.15 : 1);
+      const jitter = plan.messy ? 0.08 : 0.02;
+      const kickUp = plan.messy ? 0.045 : 0.012;
+
       body.velocity.set(
         planeNormal.x * side * boost + tangent.x * (Math.random() - 0.5) * jitter * boost,
-        kickUp + Math.random() * 0.15,
+        kickUp,
         planeNormal.z * side * boost + tangent.z * (Math.random() - 0.5) * jitter * boost,
       );
       body.angularVelocity.set(
-        (Math.random() - 0.5) * boost * (plan.messy ? 0.55 : 0.25),
-        (Math.random() - 0.5) * boost * 0.2,
-        (Math.random() - 0.5) * boost * (plan.messy ? 0.55 : 0.25),
+        (Math.random() - 0.5) * boost * (plan.messy ? 0.35 : 0.08),
+        (Math.random() - 0.5) * boost * 0.06,
+        (Math.random() - 0.5) * boost * (plan.messy ? 0.35 : 0.08),
       );
-      body.position.y += 0.04;
       world.addBody(body);
 
       const childGen = generation + 1;
@@ -345,6 +355,7 @@ export function createFractureWorld(): FractureWorld {
         generation: childGen,
         splittable: isRechopWorthy(diag, childGen),
         bornAt: now,
+        settleUntil: now + settleMs,
       };
       fragment.userData.phys = entry;
       fragment.userData.role = 'fragment';
@@ -407,6 +418,26 @@ export function createFractureWorld(): FractureWorld {
     }
     // Prevent spiral of death
     if (accumulator > FIXED * 2) accumulator = 0;
+
+    // Quick settle: kill residual motion so wedges stay cracked-open on the stump.
+    const now = performance.now();
+    for (const f of fragments) {
+      if (now < f.settleUntil) continue;
+      if (f.body.sleepState === CANNON.Body.SLEEPING) continue;
+      const speed = f.body.velocity.length();
+      const spin = f.body.angularVelocity.length();
+      if (speed < 0.55 && spin < 1.2) {
+        f.body.velocity.set(0, 0, 0);
+        f.body.angularVelocity.set(0, 0, 0);
+        f.body.sleep();
+      } else {
+        // Soft brake if still sliding off — prefer stay-on-block over freefall.
+        f.body.velocity.x *= 0.35;
+        f.body.velocity.z *= 0.35;
+        f.body.velocity.y = Math.min(f.body.velocity.y, 0.05);
+        f.body.angularVelocity.scale(0.25);
+      }
+    }
   }
 
   function sync(): void {

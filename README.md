@@ -18,14 +18,15 @@ pnpm --filter @firewood/h5 dev
 
 首次需要在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**（点一次即可）。之后推送到 `main` 或 `cursor/**` 分支会自动构建并部署 `apps/h5/dist`。
 
-玩法循环：选树种/斧头 → **点击木头瞄准** → 节奏力道条指针往返 → **按下定格** →
+玩法循环：边缘轻触切换树种/斧头 → **第一次点木头**（出节奏力道条）→ **再点一下劈下** →
 
-- 切换树种会更换树皮 / 断面贴图（Poly Haven CC0）
-- 力道条绿带由硬度 × 斧头属性决定（不总在正中）；指针自动往返，按下瞬间取样
-- `too_light`：浅痕，不碎裂
-- `sweet`：沿瞄准点**竖向劈面**干净劈开，碎块向两侧分开再落下
-- `too_heavy`：仍是定向劈面，但碎块更多更乱
-- 可点击较大碎块继续劈，或「再来一斧」重置
+- 初始几乎无 HUD；树种/斧头收成左右边缘芯片，点开才展开
+- 力道条绿带由硬度 × 斧头属性决定；指针自动往返（「转转转」），第二次点击瞬间取样
+- 第二次点击**总会**播放斧头自上而下挥砍（即使指针不在绿带）
+- `too_light`：斧头回弹，木桩几何不变（仅浅痕）
+- `sweet`：沿瞄准点竖向劈面出现裂纹，两半**轻微分开**仍停在桩上（非爆裂落地）
+- `too_heavy`：仍是定向劈面，缝略宽或带次要碎口，但仍不飞散到地面
+- 可点击较大碎块继续劈，或点右下角重置
 
 其他常用命令：
 
@@ -69,8 +70,8 @@ scripts/pull-assets.mjs  # 从 Poly Haven API 拉取 1K 贴图与 GLTF
 | 主路径 | `DestructibleMesh.sliceWorld` — 过瞄准点的竖向劈面（grain / up） |
 | 过猛 | 同劈面递归二次剖分，碎块仍沿 ±法向侧向冲量 |
 | 回退 | 2.5D Voronoi（沿 Y 挤出）+ 劈面两侧种子点 |
-| 物理 | `cannon-es`（AABB Box 近似）+ 双侧侧向 impulse |
-| 预算 | `planFracture()` → `splitStyle: cleave \| cleave_messy \| nick` |
+| 物理 | `cannon-es`（AABB）+ **楔开定格**（`wedgeGap` 微位移 + 极小 impulse + 快速 sleep） |
+| 预算 | `planFracture()` → `splitStyle: cleave \| cleave_messy \| nick` + `wedgeGap` |
 
 ## 平台路线
 
