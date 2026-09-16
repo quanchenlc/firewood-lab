@@ -131,7 +131,7 @@ export function createLogScene(
   const axeAnchor = new THREE.Group();
   axeAnchor.position.copy(axeRestPos);
   // Standing-chop rest: handle near vertical, slight forward lean toward the log.
-  axeAnchor.rotation.set(0.12, -0.55, 0);
+  axeAnchor.rotation.set(0.1, -0.25, 0);
   scene.add(axeAnchor);
   let axeSwingT = -1;
   let axeRestQuat = new THREE.Quaternion().copy(axeAnchor.quaternion);
@@ -304,7 +304,7 @@ export function createLogScene(
     // Same grip convention for every axe model: handle ~+Y, bit -Y.
     axeAnchor.add(clone);
     axeAnchor.position.copy(axeRestPos);
-    axeAnchor.rotation.set(0.12, -0.55, 0);
+    axeAnchor.rotation.set(0.1, -0.25, 0);
     axeRestQuat.copy(axeAnchor.quaternion);
     axeFade = 1;
     setAxeOpacity(1);
@@ -312,9 +312,13 @@ export function createLogScene(
 
   function playAxeSwing(aimPoint: THREE.Vector3): void {
     axeSwingAim.copy(aimPoint);
-    // Hover just above the aim so the bit reads as striking into the wood.
-    axeImpactPos.set(aimPoint.x, aimPoint.y + 0.42, aimPoint.z);
-    axeRaisedPos.set(aimPoint.x * 0.35 + axeRestPos.x * 0.65, aimPoint.y + 1.15, aimPoint.z * 0.35 + axeRestPos.z * 0.65);
+    // Hover above aim so local -Y bit reads as striking down into the wood.
+    axeImpactPos.set(aimPoint.x, aimPoint.y + 0.55, aimPoint.z);
+    axeRaisedPos.set(
+      aimPoint.x * 0.25 + axeRestPos.x * 0.75,
+      Math.max(aimPoint.y + 1.25, axeRestPos.y + 0.35),
+      aimPoint.z * 0.25 + axeRestPos.z * 0.75,
+    );
     axeSwingT = 0;
     axeFade = 1;
     setAxeOpacity(1);
@@ -360,31 +364,36 @@ export function createLogScene(
 
     if (axeSwingT >= 0) {
       axeSwingT += dt;
-      const duration = 0.48;
-      const t = Math.min(1, axeSwingT / duration);
-      // 0–0.55: raise→impact (handle upright, bit down). 0.55–1: retract + fade.
-      if (t < 0.55) {
-        const u = t / 0.55;
+      // Raise → strike (upright bit-down) → brief hold → retract/fade
+      const tRaise = 0.22;
+      const tHold = 0.38;
+      const tEnd = 0.7;
+      if (axeSwingT < tRaise) {
+        const u = axeSwingT / tRaise;
         const ease = u * u * (3 - 2 * u);
         axeAnchor.position.lerpVectors(axeRaisedPos, axeImpactPos, ease);
-        // Raised lean back → impact nearly vertical with slight forward lean
-        const raisedX = -0.35;
-        const impactX = 0.08;
-        axeAnchor.rotation.set(raisedX + (impactX - raisedX) * ease, -0.25, 0);
+        // Keep handle near world +Y; only a small pitch change (no yaw twist).
+        const raisedX = -0.28;
+        const impactX = 0.06;
+        axeAnchor.rotation.set(raisedX + (impactX - raisedX) * ease, 0, 0);
         axeFade = 1;
         setAxeOpacity(1);
-      } else {
-        const u = (t - 0.55) / 0.45;
+      } else if (axeSwingT < tHold) {
+        axeAnchor.position.copy(axeImpactPos);
+        axeAnchor.rotation.set(0.06, 0, 0);
+        axeFade = 1;
+        setAxeOpacity(1);
+      } else if (axeSwingT < tEnd) {
+        const u = (axeSwingT - tHold) / (tEnd - tHold);
         axeAnchor.position.lerpVectors(axeImpactPos, axeRestPos, u);
-        axeAnchor.rotation.set(0.12 + 0.0 * u, -0.55, 0);
+        axeAnchor.rotation.set(0.06 + 0.04 * u, -0.25 * u, 0);
         axeFade = 1 - u;
         setAxeOpacity(Math.max(0.05, axeFade));
-      }
-      if (t >= 1) {
+      } else {
         axeSwingT = -1;
         axeAnchor.position.copy(axeRestPos);
         axeAnchor.quaternion.copy(axeRestQuat);
-        axeAnchor.rotation.set(0.12, -0.55, 0);
+        axeAnchor.rotation.set(0.1, -0.25, 0);
         axeFade = 1;
         setAxeOpacity(1);
       }
