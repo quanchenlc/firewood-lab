@@ -111,11 +111,11 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
     fragmentCount = clampInt(base, generation > 0 ? MIN_RECHOP : 2, Math.min(cap, 3));
   }
 
-  // Tiny lateral nudge — ~8–12% of log diameter total crack (screen.toys feel).
+  // Tiny lateral nudge — ~8–14% of log diameter total crack (screen.toys feel).
   const impulse =
     outcome === 'too_heavy' ? 0.06 + weight * 0.04 : 0.04 + weight * 0.02;
   const wedgeGap =
-    outcome === 'too_heavy' ? 0.03 + weight * 0.01 : 0.02 + weight * 0.008;
+    outcome === 'too_heavy' ? 0.038 + weight * 0.012 : 0.028 + weight * 0.01;
 
   return {
     fragmentCount,

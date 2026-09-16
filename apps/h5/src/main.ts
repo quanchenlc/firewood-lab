@@ -517,6 +517,9 @@ async function boot(): Promise<void> {
     armLocked: () => armLockedTarget(),
     fragmentCount: () => logScene.fracture.fragments.length,
     splittableCount: () => logScene.fracture.fragments.filter((f) => f.splittable).length,
+    /** Freeze axe at vertical impact pose over the log (for screenshot tests). */
+    freezeAxeImpact: () => logScene.debugFreezeAxeImpact(),
+    getAxePose: () => logScene.debugAxePose(),
     outcomePreview: () =>
       resolveChop({ slider01: rhythm01, species: currentSpecies(), axe: currentAxe() }),
   };
