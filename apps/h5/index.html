@@ -23,51 +23,48 @@
         </div>
       </div>
 
-      <div class="top-bar">
-        <div class="brand-mini">Firewood Lab</div>
-        <p id="phase-hint" class="phase-hint">加载中…</p>
-      </div>
+      <!-- Tiny rest hint — fades once chopping starts (screen.toys-style lean HUD) -->
+      <p id="phase-hint" class="phase-hint is-soft">拖动旋转 · 点木头开始</p>
 
-      <div class="hud">
-        <label class="row">
-          <span>树种</span>
-          <select id="species"></select>
-        </label>
-        <p id="species-meta" class="meta"></p>
-
-        <label class="row">
-          <span>斧头</span>
-          <select id="axe"></select>
-        </label>
-        <p id="axe-meta" class="meta"></p>
-
-        <div id="power-panel" class="power-panel is-disabled" aria-disabled="true">
-          <div class="row rhythm-row">
-            <span>力道</span>
-            <div
-              id="rhythm-bar"
-              class="rhythm-bar"
-              role="img"
-              aria-label="力道节奏条：指针自动往返，按下定格"
-            >
-              <div class="rhythm-track" aria-hidden="true"></div>
-              <div id="sweet-zone" class="sweet-zone" aria-hidden="true"></div>
-              <div id="rhythm-knob" class="rhythm-knob" aria-hidden="true"></div>
-            </div>
-            <output id="slider-value">0.50</output>
-          </div>
-          <p id="force-preview" class="force-preview">预计：—</p>
-          <div class="actions">
-            <button type="button" id="chop-btn" class="btn primary">定格劈下</button>
-            <button type="button" id="reset-aim-btn" class="btn ghost">重瞄</button>
-          </div>
-          <p class="rhythm-hint">指针自动往返；在绿带时按下定格（按下瞬间取样）</p>
+      <!-- Edge chips: collapsed until tapped -->
+      <div id="species-chip" class="edge-chip edge-chip--left" data-open="false">
+        <button type="button" id="species-chip-btn" class="edge-chip-btn" aria-expanded="false" aria-controls="species-panel">
+          <span class="edge-chip-icon" aria-hidden="true">木</span>
+          <span id="species-chip-label" class="edge-chip-label">树种</span>
+        </button>
+        <div id="species-panel" class="edge-chip-panel" hidden>
+          <select id="species" aria-label="树种"></select>
         </div>
-
-        <p class="result" id="result">—</p>
-        <p class="tip" id="tip">选好树种与斧头，然后点木头瞄准。</p>
-        <button type="button" id="again-btn" class="btn again is-hidden">再来一斧</button>
       </div>
+
+      <div id="axe-chip" class="edge-chip edge-chip--right" data-open="false">
+        <button type="button" id="axe-chip-btn" class="edge-chip-btn" aria-expanded="false" aria-controls="axe-panel">
+          <span class="edge-chip-icon" aria-hidden="true">斧</span>
+          <span id="axe-chip-label" class="edge-chip-label">斧头</span>
+        </button>
+        <div id="axe-panel" class="edge-chip-panel" hidden>
+          <select id="axe" aria-label="斧头"></select>
+        </div>
+      </div>
+
+      <div id="power-panel" class="power-dock is-hidden" aria-hidden="true">
+        <div
+          id="rhythm-bar"
+          class="rhythm-bar"
+          role="img"
+          aria-label="力道节奏条：指针自动往返，再点一下劈下"
+        >
+          <div class="rhythm-track" aria-hidden="true"></div>
+          <div id="sweet-zone" class="sweet-zone" aria-hidden="true"></div>
+          <div id="rhythm-knob" class="rhythm-knob" aria-hidden="true"></div>
+        </div>
+        <p id="force-preview" class="force-preview is-idle sr-only">再点一下劈下</p>
+      </div>
+
+      <p class="result is-soft" id="result" aria-live="polite"></p>
+      <button type="button" id="again-btn" class="again-fab is-hidden" aria-label="再来一斧">↺</button>
+
+      <p class="credits" aria-hidden="true">Firewood Lab · Poly Haven CC0</p>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

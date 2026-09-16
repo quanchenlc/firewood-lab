@@ -30,6 +30,11 @@ export interface FracturePlan {
   fragmentCount: number;
   /** Lateral split impulse along the cleave-plane normal (not radial burst). */
   impulse: number;
+  /**
+   * World-space half-gap along the cleave normal — pieces nudge apart and
+   * stay mostly wedged on the stump (screen.toys-style), not a physics dump.
+   */
+  wedgeGap: number;
   /** Impact seed concentration radius (local units; used by Voronoi fallback). */
   impactRadius: number;
   /** Whether to leave a shallow nick instead of fracturing. */
@@ -41,9 +46,9 @@ export interface FracturePlan {
 }
 
 const SWEET_PIECES = 2;
-const HEAVY_BASE = 5;
-const MAX_FRAGMENTS = 8;
-const WEAK_CAP = 6;
+const HEAVY_BASE = 3;
+const MAX_FRAGMENTS = 4;
+const WEAK_CAP = 3;
 const MIN_RECHOP = 2;
 
 /** Soft cap on simultaneous physics fragments in the scene. */
@@ -83,6 +88,7 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
     return {
       fragmentCount: 0,
       impulse: 0,
+      wedgeGap: 0,
       impactRadius: 0.12,
       nickOnly: true,
       messy: false,
@@ -91,7 +97,6 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
   }
 
   const weight = axe?.weight ?? 0.5;
-  const edge = axe?.edge ?? 0.6;
   const genScale = generation <= 0 ? 1 : generation === 1 ? 0.7 : 0.5;
 
   const messy = outcome === 'too_heavy';
@@ -99,19 +104,25 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
   if (!messy) {
     fragmentCount = SWEET_PIECES;
   } else {
-    let base = Math.round(HEAVY_BASE * (0.9 + 0.2 * weight + 0.1 * edge) * genScale);
+    // Reference: even heavy/multi chops stay as upright wedges in a cluster —
+    // prefer one extra nick over a fireworks piece dump.
+    let base = Math.round(HEAVY_BASE * (0.95 + 0.15 * weight) * genScale);
     const cap = weakDevice ? WEAK_CAP : MAX_FRAGMENTS;
-    fragmentCount = clampInt(base, generation > 0 ? MIN_RECHOP : 4, cap);
+    fragmentCount = clampInt(base, generation > 0 ? MIN_RECHOP : 2, Math.min(cap, 3));
   }
 
-  // Lateral open — modest so halves fall beside the stump, not firework
+  // Tiny lateral nudge — ~8–12% of log diameter total crack (screen.toys feel).
   const impulse =
-    outcome === 'too_heavy' ? 1.05 + weight * 0.75 : 0.85 + weight * 0.4;
+    outcome === 'too_heavy' ? 0.06 + weight * 0.04 : 0.04 + weight * 0.02;
+  const wedgeGap =
+    outcome === 'too_heavy' ? 0.03 + weight * 0.01 : 0.02 + weight * 0.008;
 
   return {
     fragmentCount,
-    impulse: impulse * (generation > 0 ? 0.75 : 1),
-    impactRadius: outcome === 'too_heavy' ? 0.32 : 0.22,
+    impulse: impulse * (generation > 0 ? 0.65 : 1),
+    // Later chops open even less so the cluster stays tight on the stump.
+    wedgeGap: wedgeGap * (generation > 0 ? 0.55 : 1),
+    impactRadius: outcome === 'too_heavy' ? 0.24 : 0.18,
     nickOnly: false,
     messy,
     splitStyle: messy ? 'cleave_messy' : 'cleave',

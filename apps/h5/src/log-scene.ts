@@ -25,7 +25,7 @@ export interface LogScene {
   resetLog(): void;
   setSpecies(species: Species): Promise<void>;
   setAxeVisual(root: THREE.Object3D | null): void;
-  playAxeSwing(aimPoint: THREE.Vector3): void;
+  playAxeSwing(aimPoint: THREE.Vector3, opts?: { rebound?: boolean }): void;
   punchScale(amount?: number): void;
   setShake(intensity: number): void;
   update(dt: number): void;
@@ -134,6 +134,7 @@ export function createLogScene(
   axeAnchor.rotation.set(0.1, -0.25, 0);
   scene.add(axeAnchor);
   let axeSwingT = -1;
+  let axeRebound = false;
   let axeRestQuat = new THREE.Quaternion().copy(axeAnchor.quaternion);
   const axeSwingAim = new THREE.Vector3();
   const axeImpactPos = new THREE.Vector3();
@@ -310,8 +311,9 @@ export function createLogScene(
     setAxeOpacity(1);
   }
 
-  function playAxeSwing(aimPoint: THREE.Vector3): void {
+  function playAxeSwing(aimPoint: THREE.Vector3, opts?: { rebound?: boolean }): void {
     axeSwingAim.copy(aimPoint);
+    axeRebound = !!opts?.rebound;
     // Hover above aim so local -Y bit reads as striking down into the wood.
     axeImpactPos.set(aimPoint.x, aimPoint.y + 0.55, aimPoint.z);
     axeRaisedPos.set(
@@ -364,33 +366,45 @@ export function createLogScene(
 
     if (axeSwingT >= 0) {
       axeSwingT += dt;
-      // Raise → strike (upright bit-down) → brief hold → retract/fade
-      const tRaise = 0.22;
-      const tHold = 0.38;
-      const tEnd = 0.7;
+      // Raise → strike (upright bit-down) → hold / rebound → retract
+      const tRaise = 0.2;
+      const tHold = axeRebound ? 0.28 : 0.36;
+      const tEnd = axeRebound ? 0.58 : 0.68;
       if (axeSwingT < tRaise) {
         const u = axeSwingT / tRaise;
         const ease = u * u * (3 - 2 * u);
         axeAnchor.position.lerpVectors(axeRaisedPos, axeImpactPos, ease);
-        // Keep handle near world +Y; only a small pitch change (no yaw twist).
         const raisedX = -0.28;
         const impactX = 0.06;
         axeAnchor.rotation.set(raisedX + (impactX - raisedX) * ease, 0, 0);
         axeFade = 1;
         setAxeOpacity(1);
       } else if (axeSwingT < tHold) {
-        axeAnchor.position.copy(axeImpactPos);
-        axeAnchor.rotation.set(0.06, 0, 0);
+        if (axeRebound) {
+          // Bounce back up along the strike path — stump geometry unchanged.
+          const u = (axeSwingT - tRaise) / Math.max(1e-6, tHold - tRaise);
+          const bounce = Math.sin(Math.min(1, u) * Math.PI);
+          axeAnchor.position.lerpVectors(axeImpactPos, axeRaisedPos, bounce * 0.72);
+          axeAnchor.rotation.set(0.06 - 0.38 * bounce, 0, 0);
+        } else {
+          axeAnchor.position.copy(axeImpactPos);
+          axeAnchor.rotation.set(0.06, 0, 0);
+        }
         axeFade = 1;
         setAxeOpacity(1);
       } else if (axeSwingT < tEnd) {
         const u = (axeSwingT - tHold) / (tEnd - tHold);
-        axeAnchor.position.lerpVectors(axeImpactPos, axeRestPos, u);
+        if (axeRebound) {
+          axeAnchor.position.lerpVectors(axeRaisedPos, axeRestPos, u);
+        } else {
+          axeAnchor.position.lerpVectors(axeImpactPos, axeRestPos, u);
+        }
         axeAnchor.rotation.set(0.06 + 0.04 * u, -0.25 * u, 0);
         axeFade = 1 - u;
         setAxeOpacity(Math.max(0.05, axeFade));
       } else {
         axeSwingT = -1;
+        axeRebound = false;
         axeAnchor.position.copy(axeRestPos);
         axeAnchor.quaternion.copy(axeRestQuat);
         axeAnchor.rotation.set(0.1, -0.25, 0);
