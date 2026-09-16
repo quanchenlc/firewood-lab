@@ -1,0 +1,38 @@
+[
+  {
+    "id": "hand-axe",
+    "name": "Hand axe",
+    "weight": 0.35,
+    "sharpness": 0.75,
+    "edge": 0.55,
+    "precision": 0.7,
+    "tip": "Light and nimble — great for softwood, easy to under-power hardwood."
+  },
+  {
+    "id": "nordic-splitting-axe",
+    "name": "Nordic splitting axe",
+    "weight": 0.7,
+    "sharpness": 0.6,
+    "edge": 0.85,
+    "precision": 0.55,
+    "tip": "Wide wedge converts force into split; forgiving on knotty rounds."
+  },
+  {
+    "id": "camp-axe",
+    "name": "Camp axe",
+    "weight": 0.5,
+    "sharpness": 0.7,
+    "edge": 0.6,
+    "precision": 0.65,
+    "tip": "Balanced all-rounder — a solid default for learning the power slider."
+  },
+  {
+    "id": "maul",
+    "name": "Maul",
+    "weight": 0.95,
+    "sharpness": 0.4,
+    "edge": 0.9,
+    "precision": 0.4,
+    "tip": "Heavy maul: overswing risk is high; aim for hardwood sweet spots."
+  }
+]
