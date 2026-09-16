@@ -18,6 +18,7 @@ export {
   planFracture,
   cleaveNormalXZ,
   isRechopWorthy,
+  MAX_RECHOP_GENERATION,
   MIN_RECHOP_DIAGONAL,
   MAX_LIVE_FRAGMENTS,
   TINY_CHIP_DIAGONAL,

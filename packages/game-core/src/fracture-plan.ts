@@ -111,11 +111,11 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
     fragmentCount = clampInt(base, generation > 0 ? MIN_RECHOP : 2, Math.min(cap, 3));
   }
 
-  // Tiny lateral nudge — ~8–12% of log diameter total crack (screen.toys feel).
+  // Tiny lateral nudge — ~8–14% of log diameter total crack (screen.toys feel).
   const impulse =
     outcome === 'too_heavy' ? 0.06 + weight * 0.04 : 0.04 + weight * 0.02;
   const wedgeGap =
-    outcome === 'too_heavy' ? 0.03 + weight * 0.01 : 0.02 + weight * 0.008;
+    outcome === 'too_heavy' ? 0.038 + weight * 0.012 : 0.028 + weight * 0.01;
 
   return {
     fragmentCount,
@@ -130,10 +130,12 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
 }
 
 /** Pieces smaller than this (bbox diagonal) are not re-choppable. */
-export const MIN_RECHOP_DIAGONAL = 0.35;
+export const MIN_RECHOP_DIAGONAL = 0.28;
+/** Soft cap so multi-tap can produce several parallel upright slices. */
+export const MAX_RECHOP_GENERATION = 5;
 
 export function isRechopWorthy(bboxDiagonal: number, generation: number): boolean {
-  if (generation >= 2) return false;
+  if (generation >= MAX_RECHOP_GENERATION) return false;
   return bboxDiagonal >= MIN_RECHOP_DIAGONAL;
 }
 
