@@ -185,9 +185,10 @@ export function createLogScene(canvas: HTMLCanvasElement): LogScene {
     halfB.position.set(0, 0, 0);
     halfA.rotation.set(0, 0, Math.PI / 2);
     halfB.rotation.set(0, Math.PI, Math.PI / 2);
-    const bias = aimPoint.clone().sub(logGroup.position).normalize();
-    splitVel[0]!.set(-1.15 - bias.x * 0.2, 1.05, 0.4);
-    splitVel[1]!.set(1.15 + bias.x * 0.2, 0.95, -0.35);
+    // Slide apart mostly along Z (across the log), stay on the stump.
+    const side = Math.sign(aimPoint.z) || 1;
+    splitVel[0]!.set(-0.15, 0.55, -0.95 * side);
+    splitVel[1]!.set(0.15, 0.5, 0.95 * side);
     splitT = 0;
   }
 
@@ -196,12 +197,15 @@ export function createLogScene(canvas: HTMLCanvasElement): LogScene {
     splitT = -1;
     halfA.position.set(0, 0, 0);
     halfB.position.set(0, 0, 0);
+    halfA.rotation.set(0, 0, Math.PI / 2);
+    halfB.rotation.set(0, Math.PI, Math.PI / 2);
     logGroup.scale.set(1, 1, 1);
     logGroup.visible = true;
     clearMarker();
     const mat = logMesh.material as THREE.MeshStandardMaterial;
     mat.color.setHex(LOG_COLOR);
-    mat.emissive?.setHex(0x000000);
+    mat.emissive.setHex(0x000000);
+    mat.emissiveIntensity = 0;
   }
 
   function punchScale(amount = 0.12): void {
@@ -222,9 +226,9 @@ export function createLogScene(canvas: HTMLCanvasElement): LogScene {
       logGroup.scale.set(1, 1, 1);
     }
 
-    if (splitT >= 0) {
+    if (splitT >= 0 && splitT < 0.85) {
       splitT += dt;
-      const g = 2.6;
+      const g = 1.8;
       for (let i = 0; i < 2; i++) {
         const mesh = halves.children[i] as THREE.Mesh;
         const v = splitVel[i]!;
@@ -232,9 +236,19 @@ export function createLogScene(canvas: HTMLCanvasElement): LogScene {
         mesh.position.y += v.y * dt;
         mesh.position.z += v.z * dt;
         v.y -= g * dt;
-        mesh.rotation.x += (i === 0 ? -1 : 1) * dt * 2.2;
-        mesh.rotation.z += dt * 1.4;
+        // Rest on stump top (world y ≈ 0.46 → local y ≈ 0.46 - 0.95)
+        const floorY = -0.42;
+        if (mesh.position.y < floorY) {
+          mesh.position.y = floorY;
+          v.y = 0;
+          v.x *= 0.85;
+          v.z *= 0.85;
+        }
+        mesh.rotation.x += (i === 0 ? -0.7 : 0.7) * dt;
+        mesh.rotation.y += (i === 0 ? 0.5 : -0.5) * dt;
       }
+    } else if (splitT >= 0) {
+      splitT += dt;
     }
 
     markerRing.rotation.z += dt * 2.5;
