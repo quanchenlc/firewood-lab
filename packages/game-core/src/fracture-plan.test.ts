@@ -73,7 +73,8 @@ describe('cleaveNormalXZ', () => {
 describe('isRechopWorthy', () => {
   it('rejects tiny or over-generated pieces', () => {
     assert.equal(isRechopWorthy(0.2, 0), false);
-    assert.equal(isRechopWorthy(0.5, 2), false);
+    assert.equal(isRechopWorthy(0.5, 5), false);
+    assert.equal(isRechopWorthy(0.5, 2), true);
     assert.equal(isRechopWorthy(0.5, 0), true);
   });
 });

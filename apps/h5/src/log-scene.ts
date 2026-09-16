@@ -21,7 +21,12 @@ export interface LogScene {
     aimPoint: THREE.Vector3,
     plan: FracturePlan,
     generation: number,
+    opts?: { planeNormal?: THREE.Vector3 },
   ): PhysFragment[];
+  /** Largest re-choppable fragment, or null. */
+  pickNextChopTarget(): { mesh: DestructibleMesh; point: THREE.Vector3; generation: number } | null;
+  /** World-space cleave normal used for the last successful split (if any). */
+  lastCleaveNormal: THREE.Vector3 | null;
   resetLog(): void;
   setSpecies(species: Species): Promise<void>;
   setAxeVisual(root: THREE.Object3D | null): void;
@@ -50,25 +55,48 @@ function buildLogGeometry(): THREE.BufferGeometry {
 }
 
 /**
- * Poly Haven axes are already handle-along-Y. Put the heavier/head end at -Y
- * so a standing chop reads as bit-down into the wood.
+ * Poly Haven axes: longest axis = handle. Normalize so:
+ * - handle along local +Y (butt up)
+ * - bit / head toward local -Y
+ * - thinnest axis → local +X (blade faces ±X) for a vertical bit silhouette
  */
-function orientAxeBitDown(root: THREE.Object3D): void {
+function orientAxeGrip(root: THREE.Object3D): void {
   root.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(root);
-  const center = box.getCenter(new THREE.Vector3());
-  const upExtent = box.max.y - center.y;
-  const downExtent = center.y - box.min.y;
-  // If more of the mesh sits above center, head is likely on +Y → flip bit down.
+  const size = box.getSize(new THREE.Vector3());
+
+  // Map longest bbox axis onto +Y (handle).
+  if (size.x >= size.y && size.x >= size.z) {
+    root.rotateZ(-Math.PI / 2);
+  } else if (size.z >= size.y && size.z >= size.x) {
+    root.rotateX(Math.PI / 2);
+  }
+  root.updateMatrixWorld(true);
+
+  let box2 = new THREE.Box3().setFromObject(root);
+  let size2 = box2.getSize(new THREE.Vector3());
+  // Thinnest horizontal axis → +X so the blade plane is YZ (vertical bit).
+  if (size2.z < size2.x) {
+    root.rotateY(Math.PI / 2);
+    root.updateMatrixWorld(true);
+    box2 = new THREE.Box3().setFromObject(root);
+    size2 = box2.getSize(new THREE.Vector3());
+  }
+
+  const center = box2.getCenter(new THREE.Vector3());
+  const upExtent = box2.max.y - center.y;
+  const downExtent = center.y - box2.min.y;
+  // Heavier/head end usually has more radial mass; prefer bit at -Y.
   if (upExtent >= downExtent * 0.92) {
     root.rotateZ(Math.PI);
   }
+
   root.updateMatrixWorld(true);
-  const box2 = new THREE.Box3().setFromObject(root);
-  const c2 = box2.getCenter(new THREE.Vector3());
-  root.position.x -= c2.x;
-  root.position.y -= c2.y;
-  root.position.z -= c2.z;
+  const box3 = new THREE.Box3().setFromObject(root);
+  const c3 = box3.getCenter(new THREE.Vector3());
+  root.position.x -= c3.x;
+  root.position.y -= c3.y;
+  root.position.z -= c3.z;
 }
 
 export function createLogScene(
@@ -130,8 +158,8 @@ export function createLogScene(
   const axeRestPos = new THREE.Vector3(1.55, logCenterY + 0.65, 1.15);
   const axeAnchor = new THREE.Group();
   axeAnchor.position.copy(axeRestPos);
-  // Standing-chop rest: handle near vertical, slight forward lean toward the log.
-  axeAnchor.rotation.set(0.1, -0.25, 0);
+  // Rest: handle world-vertical (no 45° lean). Slight yaw only for park pose.
+  axeAnchor.rotation.set(0, -0.15, 0);
   scene.add(axeAnchor);
   let axeSwingT = -1;
   let axeRebound = false;
@@ -139,7 +167,19 @@ export function createLogScene(
   const axeSwingAim = new THREE.Vector3();
   const axeImpactPos = new THREE.Vector3();
   const axeRaisedPos = new THREE.Vector3();
+  /** Horizontal axis to pitch around during the vertical top→down swing. */
+  const axeSwingAxis = new THREE.Vector3(1, 0, 0);
+  const axeGripQuat = new THREE.Quaternion();
   let axeFade = 1;
+  let lastCleaveNormal: THREE.Vector3 | null = null;
+
+  const _swingQuat = new THREE.Quaternion();
+  const _pitchQuat = new THREE.Quaternion();
+  const _up = new THREE.Vector3(0, 1, 0);
+  const _tmp = new THREE.Vector3();
+  const _right = new THREE.Vector3();
+  const _fwd = new THREE.Vector3();
+  const _basis = new THREE.Matrix4();
 
   const marker = new THREE.Mesh(
     new THREE.SphereGeometry(0.05, 14, 14),
@@ -249,18 +289,63 @@ export function createLogScene(
     aimPoint: THREE.Vector3,
     plan: FracturePlan,
     generation: number,
+    opts?: { planeNormal?: THREE.Vector3 },
   ): PhysFragment[] {
     clearMarker();
     nickMark.visible = false;
-    const created = fracture.fractureMesh(target, aimPoint, plan, generation, scene);
+    const created = fracture.fractureMesh(target, aimPoint, plan, generation, scene, opts);
+    if (created.length > 0) {
+      const n = opts?.planeNormal;
+      if (n) {
+        lastCleaveNormal = new THREE.Vector3(n.x, 0, n.z).normalize();
+      } else {
+        // Infer from first wedge entry if present.
+        const w = created[0]?.wedge;
+        if (w) lastCleaveNormal = new THREE.Vector3(w.normalX, 0, w.normalZ).normalize();
+      }
+    }
     if (target === logMesh) logMesh.visible = false;
     return created;
+  }
+
+  function pickNextChopTarget(): {
+    mesh: DestructibleMesh;
+    point: THREE.Vector3;
+    generation: number;
+  } | null {
+    const candidates = fracture.fragments.filter((f) => f.splittable && f.mesh.visible);
+    if (candidates.length === 0) {
+      if (logMesh.visible && logMesh.parent) {
+        return {
+          mesh: logMesh,
+          point: new THREE.Vector3(0, logCenterY + LOG_HEIGHT * 0.15, 0),
+          generation: 0,
+        };
+      }
+      return null;
+    }
+    let best = candidates[0]!;
+    let bestDiag = 0;
+    for (const f of candidates) {
+      const box = new THREE.Box3().setFromObject(f.mesh);
+      const diag = box.getSize(new THREE.Vector3()).length();
+      if (diag > bestDiag) {
+        bestDiag = diag;
+        best = f;
+      }
+    }
+    const box = new THREE.Box3().setFromObject(best.mesh);
+    const center = box.getCenter(new THREE.Vector3());
+    // Strike through mid-height of the standing wedge (parallel to locked plane).
+    center.y = (box.min.y + box.max.y) * 0.5;
+    return { mesh: best.mesh, point: center, generation: best.generation };
   }
 
   function resetLog(): void {
     fracture.clearFragments();
     nickMark.visible = false;
     nickT = -1;
+    lastCleaveNormal = null;
     clearMarker();
     if (logMesh.parent) logMesh.removeFromParent();
     fracture.disposeMesh(logMesh);
@@ -297,15 +382,42 @@ export function createLogScene(
     });
   }
 
+  /**
+   * Build a grip quaternion: local +Y = world up (vertical handle),
+   * local -Y = bit down, local +X ≈ camera-right so the blade reads vertical
+   * (edge-on) in first-person.
+   */
+  function buildVerticalGripQuat(aim: THREE.Vector3, out: THREE.Quaternion): void {
+    _fwd.subVectors(aim, camera.position);
+    _fwd.y = 0;
+    if (_fwd.lengthSq() < 1e-8) {
+      _fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+    } else {
+      _fwd.normalize();
+    }
+    // Right = up × forward? Actually camera looks along -fwd toward log from outside.
+    // We want the swing plane vertical: pitch around horizontal axis ⊥ to view.
+    _right.crossVectors(_up, _fwd);
+    if (_right.lengthSq() < 1e-8) _right.set(1, 0, 0);
+    else _right.normalize();
+    // Re-orthogonalize forward in XZ from right × up
+    _fwd.crossVectors(_right, _up).normalize();
+
+    // Basis columns: X=right (blade face), Y=up (handle), Z=fwd
+    _basis.makeBasis(_right, _up, _fwd);
+    out.setFromRotationMatrix(_basis);
+    axeSwingAxis.copy(_right);
+  }
+
   function setAxeVisual(root: THREE.Object3D | null): void {
     while (axeAnchor.children.length) axeAnchor.remove(axeAnchor.children[0]!);
     if (!root) return;
     const clone = root.clone(true);
-    orientAxeBitDown(clone);
-    // Same grip convention for every axe model: handle ~+Y, bit -Y.
+    orientAxeGrip(clone);
+    // Same grip convention for every axe model: handle ~+Y, bit -Y, blade YZ.
     axeAnchor.add(clone);
     axeAnchor.position.copy(axeRestPos);
-    axeAnchor.rotation.set(0.1, -0.25, 0);
+    axeAnchor.rotation.set(0, -0.15, 0);
     axeRestQuat.copy(axeAnchor.quaternion);
     axeFade = 1;
     setAxeOpacity(1);
@@ -314,16 +426,31 @@ export function createLogScene(
   function playAxeSwing(aimPoint: THREE.Vector3, opts?: { rebound?: boolean }): void {
     axeSwingAim.copy(aimPoint);
     axeRebound = !!opts?.rebound;
-    // Hover above aim so local -Y bit reads as striking down into the wood.
-    axeImpactPos.set(aimPoint.x, aimPoint.y + 0.55, aimPoint.z);
-    axeRaisedPos.set(
-      aimPoint.x * 0.25 + axeRestPos.x * 0.75,
-      Math.max(aimPoint.y + 1.25, axeRestPos.y + 0.35),
-      aimPoint.z * 0.25 + axeRestPos.z * 0.75,
-    );
+    buildVerticalGripQuat(aimPoint, axeGripQuat);
+
+    // First-person strike path: raised high in the vertical plane, then straight down.
+    const camToAim = _tmp.subVectors(aimPoint, camera.position);
+    const dist = Math.max(1.2, camToAim.length() * 0.42);
+    _fwd.copy(camToAim).normalize();
+    // Impact: just above the chop point, slightly toward camera so it fills the view.
+    axeImpactPos.copy(aimPoint).addScaledVector(_fwd, -0.35);
+    axeImpactPos.y = aimPoint.y + 0.42;
+    // Raised: same XZ, higher Y — pure vertical lift (no diagonal drift).
+    axeRaisedPos.copy(axeImpactPos);
+    axeRaisedPos.y += Math.min(1.35, 0.55 + dist * 0.15);
+    // Nudge raised pose slightly toward camera for FP silhouette.
+    axeRaisedPos.addScaledVector(_fwd, -0.08);
+
     axeSwingT = 0;
     axeFade = 1;
     setAxeOpacity(1);
+  }
+
+  function applyAxeSwingPose(pitchRad: number): void {
+    // pitchRad < 0 = raised (bit tilted back); 0 = vertical handle+bit.
+    _pitchQuat.setFromAxisAngle(axeSwingAxis, pitchRad);
+    _swingQuat.multiplyQuaternions(_pitchQuat, axeGripQuat);
+    axeAnchor.quaternion.copy(_swingQuat);
   }
 
   function punchScale(amount = 0.12): void {
@@ -366,29 +493,29 @@ export function createLogScene(
 
     if (axeSwingT >= 0) {
       axeSwingT += dt;
-      // Raise → strike (upright bit-down) → hold / rebound → retract
+      // Raise → strike (vertical handle+bit, straight down) → hold / rebound → retract
       const tRaise = 0.2;
       const tHold = axeRebound ? 0.28 : 0.36;
       const tEnd = axeRebound ? 0.58 : 0.68;
+      const raisedPitch = -0.55; // lean back in the vertical swing plane only
+      const impactPitch = 0; // fully vertical at impact
       if (axeSwingT < tRaise) {
         const u = axeSwingT / tRaise;
         const ease = u * u * (3 - 2 * u);
         axeAnchor.position.lerpVectors(axeRaisedPos, axeImpactPos, ease);
-        const raisedX = -0.28;
-        const impactX = 0.06;
-        axeAnchor.rotation.set(raisedX + (impactX - raisedX) * ease, 0, 0);
+        applyAxeSwingPose(raisedPitch + (impactPitch - raisedPitch) * ease);
         axeFade = 1;
         setAxeOpacity(1);
       } else if (axeSwingT < tHold) {
         if (axeRebound) {
-          // Bounce back up along the strike path — stump geometry unchanged.
+          // Bounce back up along the vertical strike path — stump geometry unchanged.
           const u = (axeSwingT - tRaise) / Math.max(1e-6, tHold - tRaise);
           const bounce = Math.sin(Math.min(1, u) * Math.PI);
           axeAnchor.position.lerpVectors(axeImpactPos, axeRaisedPos, bounce * 0.72);
-          axeAnchor.rotation.set(0.06 - 0.38 * bounce, 0, 0);
+          applyAxeSwingPose(impactPitch + raisedPitch * bounce * 0.85);
         } else {
           axeAnchor.position.copy(axeImpactPos);
-          axeAnchor.rotation.set(0.06, 0, 0);
+          applyAxeSwingPose(impactPitch);
         }
         axeFade = 1;
         setAxeOpacity(1);
@@ -399,7 +526,8 @@ export function createLogScene(
         } else {
           axeAnchor.position.lerpVectors(axeImpactPos, axeRestPos, u);
         }
-        axeAnchor.rotation.set(0.06 + 0.04 * u, -0.25 * u, 0);
+        applyAxeSwingPose(impactPitch * (1 - u));
+        axeAnchor.quaternion.slerp(axeRestQuat, u * 0.35);
         axeFade = 1 - u;
         setAxeOpacity(Math.max(0.05, axeFade));
       } else {
@@ -407,7 +535,7 @@ export function createLogScene(
         axeRebound = false;
         axeAnchor.position.copy(axeRestPos);
         axeAnchor.quaternion.copy(axeRestQuat);
-        axeAnchor.rotation.set(0.1, -0.25, 0);
+        axeAnchor.rotation.set(0, -0.15, 0);
         axeFade = 1;
         setAxeOpacity(1);
       }
@@ -454,6 +582,10 @@ export function createLogScene(
     resize,
     dispose,
     findFragment,
+    pickNextChopTarget,
+    get lastCleaveNormal() {
+      return lastCleaveNormal;
+    },
   };
 }
 

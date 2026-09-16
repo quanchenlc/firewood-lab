@@ -130,10 +130,12 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
 }
 
 /** Pieces smaller than this (bbox diagonal) are not re-choppable. */
-export const MIN_RECHOP_DIAGONAL = 0.35;
+export const MIN_RECHOP_DIAGONAL = 0.28;
+/** Soft cap so multi-tap can produce several parallel upright slices. */
+export const MAX_RECHOP_GENERATION = 5;
 
 export function isRechopWorthy(bboxDiagonal: number, generation: number): boolean {
-  if (generation >= 2) return false;
+  if (generation >= MAX_RECHOP_GENERATION) return false;
   return bboxDiagonal >= MIN_RECHOP_DIAGONAL;
 }
 

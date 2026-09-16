@@ -47,6 +47,7 @@ export interface FractureWorld {
     plan: FracturePlan,
     generation: number,
     scene: THREE.Scene,
+    opts?: { planeNormal?: THREE.Vector3 },
   ): PhysFragment[];
   disposeMesh(mesh: THREE.Object3D, disposeMaterials?: boolean): void;
 }
@@ -216,6 +217,7 @@ export function createFractureWorld(): FractureWorld {
     worldImpact: THREE.Vector3,
     planeNormal: THREE.Vector3,
     plan: FracturePlan,
+    keepParallel: boolean,
   ): DestructibleMesh[] {
     const primary = root.sliceWorld(planeNormal, worldImpact, sliceOpts);
     if (!plan.messy || plan.fragmentCount <= 2 || primary.length === 0) {
@@ -235,7 +237,8 @@ export function createFractureWorld(): FractureWorld {
         continue;
       }
 
-      const angle = (Math.random() - 0.5) * (plan.messy ? 0.55 : 0.25);
+      // Locked multi-chop: stay in the same vertical plane family (parallel slices).
+      const angle = keepParallel ? 0 : (Math.random() - 0.5) * (plan.messy ? 0.55 : 0.25);
       const n2 = planeNormal.clone().applyAxisAngle(up, angle).normalize();
       n2.y = 0;
       if (n2.lengthSq() < 1e-8) n2.copy(planeNormal);
@@ -243,7 +246,7 @@ export function createFractureWorld(): FractureWorld {
 
       const origin = worldImpact
         .clone()
-        .add(n2.clone().multiplyScalar((Math.random() - 0.5) * 0.1));
+        .add(n2.clone().multiplyScalar((Math.random() - 0.5) * (keepParallel ? 0.04 : 0.1)));
       origin.y = worldImpact.y;
 
       try {
@@ -414,11 +417,16 @@ export function createFractureWorld(): FractureWorld {
     plan: FracturePlan,
     generation: number,
     scene: THREE.Scene,
+    opts?: { planeNormal?: THREE.Vector3 },
   ): PhysFragment[] {
     if (plan.fragmentCount <= 0 || plan.nickOnly) return [];
 
     mesh.updateMatrixWorld(true);
-    const planeNormal = buildCleaveNormal(mesh, worldImpact);
+    const locked = opts?.planeNormal;
+    const planeNormal = locked
+      ? new THREE.Vector3(locked.x, 0, locked.z).normalize()
+      : buildCleaveNormal(mesh, worldImpact);
+    if (planeNormal.lengthSq() < 1e-8) planeNormal.set(1, 0, 0);
 
     const existingIdx = fragments.findIndex((f) => f.mesh === mesh);
     if (existingIdx >= 0) {
@@ -427,7 +435,7 @@ export function createFractureWorld(): FractureWorld {
 
     let pieces: DestructibleMesh[] = [];
     try {
-      pieces = cleavePieces(mesh, worldImpact, planeNormal, plan);
+      pieces = cleavePieces(mesh, worldImpact, planeNormal, plan, !!locked);
     } catch (err) {
       console.warn('[fracture] planar cleave failed, trying grain-biased Voronoi', err);
       try {

@@ -2,6 +2,7 @@ import './style.css';
 import * as THREE from 'three';
 import { DestructibleMesh } from '@dgreenheck/three-pinata';
 import {
+  cleaveNormalXZ,
   getSweetSliderRange,
   planFracture,
   resolveChop,
@@ -104,6 +105,8 @@ async function boot(): Promise<void> {
   let aimPoint: THREE.Vector3 | null = null;
   let aimTarget: DestructibleMesh | null = null;
   let aimGeneration = 0;
+  /** After first contact, subsequent taps reuse this vertical cleave direction. */
+  let lockedCleaveNormal: THREE.Vector3 | null = null;
   let lastOutcome: ChopOutcome | null = null;
   let speciesBusy = false;
   let tabHidden = typeof document !== 'undefined' && document.hidden;
@@ -154,7 +157,9 @@ async function boot(): Promise<void> {
       phaseHint.classList.remove('is-gone');
       phaseHint.classList.add('is-soft');
       phaseHint.textContent = logScene.fracture.fragments.some((f) => f.splittable)
-        ? '点剩余木块继续'
+        ? lockedCleaveNormal
+          ? '再点继续劈'
+          : '点剩余木块继续'
         : '拖动旋转 · 点木头开始';
       if (!lastOutcome) {
         resultEl.textContent = '';
@@ -162,7 +167,7 @@ async function boot(): Promise<void> {
       }
     } else if (next === 'power') {
       phaseHint.classList.remove('is-gone', 'is-soft');
-      phaseHint.textContent = '再点一下劈下';
+      phaseHint.textContent = lockedCleaveNormal ? '再点一下劈下' : '再点一下劈下';
     } else {
       phaseHint.classList.add('is-gone');
       phaseHint.textContent = '';
@@ -230,6 +235,21 @@ async function boot(): Promise<void> {
     }, ms);
   }
 
+  function armLockedTarget(): boolean {
+    const next = logScene.pickNextChopTarget();
+    if (!next) {
+      aimPoint = null;
+      aimTarget = null;
+      aimGeneration = 0;
+      return false;
+    }
+    aimPoint = next.point.clone();
+    aimTarget = next.mesh;
+    aimGeneration = next.generation;
+    logScene.clearMarker();
+    return true;
+  }
+
   function aimAt(clientX: number, clientY: number): boolean {
     const rect = canvas.getBoundingClientRect();
     pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
@@ -244,6 +264,14 @@ async function boot(): Promise<void> {
     aimTarget = obj;
     const frag = logScene.findFragment(obj);
     aimGeneration = frag?.generation ?? (obj.userData.generation as number) ?? 0;
+
+    // First contact locks the vertical cleave family from aim vs piece center.
+    if (!lockedCleaveNormal) {
+      const box = new THREE.Box3().setFromObject(obj);
+      const center = box.getCenter(new THREE.Vector3());
+      const [nx, nz] = cleaveNormalXZ(hit.point.x, hit.point.z, center.x, center.z);
+      lockedCleaveNormal = new THREE.Vector3(nx, 0, nz);
+    }
 
     const normal =
       hit.face?.normal.clone().transformDirection(hit.object.matrixWorld) ??
@@ -274,8 +302,9 @@ async function boot(): Promise<void> {
     const point = aimPoint.clone();
     const generation = aimGeneration;
     const rebound = outcome === 'too_light';
+    const planeNormal = lockedCleaveNormal?.clone() ?? null;
 
-    // Always swing top→down; rebound when force is too light.
+    // Always swing top→down in the vertical plane; rebound when force is too light.
     logScene.playAxeSwing(point, { rebound });
     tintLog(target, outcome);
     flash(outcome);
@@ -299,20 +328,45 @@ async function boot(): Promise<void> {
         logScene.playNick(point);
         logScene.clearMarker();
       } else if (target.parent || target.visible) {
-        logScene.fractureAt(target, point, plan, generation);
+        logScene.fractureAt(
+          target,
+          point,
+          plan,
+          generation,
+          planeNormal ? { planeNormal } : undefined,
+        );
       } else {
-        // Target already removed (rare race) — still try fracture by world log mesh.
-        logScene.fractureAt(target, point, plan, generation);
+        logScene.fractureAt(
+          target,
+          point,
+          plan,
+          generation,
+          planeNormal ? { planeNormal } : undefined,
+        );
       }
     }, IMPACT_DELAY_MS);
 
-    aimPoint = null;
-    aimTarget = null;
     setPhase('result');
     phaseTimer = window.setTimeout(() => {
       phaseTimer = null;
       chopping = false;
-      if (phase === 'result') setPhase('aim');
+      if (phase !== 'result') return;
+
+      if (rebound && lockedCleaveNormal) {
+        // Weak force: keep locked direction + same aim; rhythm bar continues.
+        if (!aimPoint || !aimTarget) armLockedTarget();
+        setPhase('power');
+        return;
+      }
+
+      // Successful (or heavy) chop: auto-arm next parallel slice — no re-aim.
+      if (lockedCleaveNormal && armLockedTarget()) {
+        setPhase('power');
+      } else {
+        aimPoint = null;
+        aimTarget = null;
+        setPhase('aim');
+      }
     }, 720);
   }
 
@@ -322,6 +376,7 @@ async function boot(): Promise<void> {
     aimPoint = null;
     aimTarget = null;
     aimGeneration = 0;
+    lockedCleaveNormal = null;
     lastOutcome = null;
     hudLean = false;
     phaseHint.classList.remove('is-gone');
@@ -416,10 +471,16 @@ async function boot(): Promise<void> {
         const cx = rect.left + sample.x;
         const cy = rect.top + sample.y;
         if (phase === 'power' && !chopping) {
-          // Second click anywhere on the scene confirms the swing.
+          // Confirm swing — first chop or locked multi-chop (no re-aim).
           doChop();
-        } else if (phase === 'aim') {
-          aimAt(cx, cy);
+        } else if (phase === 'aim' && !chopping) {
+          if (lockedCleaveNormal && armLockedTarget()) {
+            // Subsequent taps: skip raycast aim, go straight into rhythm→chop.
+            setPhase('power');
+            doChop();
+          } else {
+            aimAt(cx, cy);
+          }
         }
       }
       pointerId = null;
@@ -448,6 +509,14 @@ async function boot(): Promise<void> {
     },
     doChop: () => doChop(),
     reset: () => resetRound(),
+    aimAt: (x: number, y: number) => aimAt(x, y),
+    getLockedCleave: () =>
+      lockedCleaveNormal
+        ? { x: lockedCleaveNormal.x, z: lockedCleaveNormal.z }
+        : null,
+    armLocked: () => armLockedTarget(),
+    fragmentCount: () => logScene.fracture.fragments.length,
+    splittableCount: () => logScene.fracture.fragments.filter((f) => f.splittable).length,
     outcomePreview: () =>
       resolveChop({ slider01: rhythm01, species: currentSpecies(), axe: currentAxe() }),
   };
