@@ -114,8 +114,9 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
   // Tiny lateral nudge only — halves part a crack, stay on the block.
   const impulse =
     outcome === 'too_heavy' ? 0.14 + weight * 0.08 : 0.08 + weight * 0.04;
+  // Visible crack width in world units (log radius ~0.38 → ~8–15% gap per side).
   const wedgeGap =
-    outcome === 'too_heavy' ? 0.055 + weight * 0.02 : 0.028 + weight * 0.012;
+    outcome === 'too_heavy' ? 0.07 + weight * 0.025 : 0.04 + weight * 0.015;
 
   return {
     fragmentCount,

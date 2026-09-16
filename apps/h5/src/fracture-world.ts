@@ -18,6 +18,19 @@ export interface PhysFragment {
   bornAt: number;
   /** After this timestamp, freeze residual motion so pieces stay wedged on the stump. */
   settleUntil: number;
+  /** Animated wedge open along cleave normal (screen.toys settle). */
+  wedge?: {
+    normalX: number;
+    normalZ: number;
+    side: number;
+    fromGap: number;
+    toGap: number;
+    startAt: number;
+    durationMs: number;
+    baseX: number;
+    baseY: number;
+    baseZ: number;
+  };
 }
 
 export interface FractureWorld {
@@ -107,7 +120,7 @@ export function createFractureWorld(): FractureWorld {
     return box.getSize(new THREE.Vector3()).length();
   }
 
-  function makeBodyFromMesh(mesh: THREE.Mesh, massScale: number): CANNON.Body {
+  function makeBodyFromMesh(mesh: THREE.Mesh, massScale: number, wedged: boolean): CANNON.Body {
     mesh.updateMatrixWorld(true);
     const worldBox = new THREE.Box3().setFromObject(mesh);
     const wsize = worldBox.getSize(new THREE.Vector3());
@@ -117,11 +130,13 @@ export function createFractureWorld(): FractureWorld {
       Math.max(0.04, wsize.z * 0.46),
     );
     const volume = Math.max(0.002, wsize.x * wsize.y * wsize.z);
-    // Heavier chips settle sooner
-    const mass = Math.max(0.08, volume * 220 * massScale);
+    // Wedged splits are posed in place (static) — free rigid bodies explode off the stump
+    // when AABB boxes penetrate the static chopping block.
+    const mass = wedged ? 0 : Math.max(0.08, volume * 220 * massScale);
 
     return new CANNON.Body({
       mass,
+      type: wedged ? CANNON.Body.STATIC : CANNON.Body.DYNAMIC,
       shape: new CANNON.Box(half),
       material: woodMat,
       position: new CANNON.Vec3(mesh.position.x, mesh.position.y, mesh.position.z),
@@ -131,9 +146,8 @@ export function createFractureWorld(): FractureWorld {
         mesh.quaternion.z,
         mesh.quaternion.w,
       ),
-      // Heavy damping so a wedged split settles in place instead of tumbling off.
-      linearDamping: 0.78,
-      angularDamping: 0.88,
+      linearDamping: wedged ? 1 : 0.78,
+      angularDamping: wedged ? 1 : 0.88,
       allowSleep: true,
       sleepSpeedLimit: 0.08,
       sleepTimeLimit: 0.12,
@@ -310,41 +324,44 @@ export function createFractureWorld(): FractureWorld {
   ): PhysFragment[] {
     const created: PhysFragment[] = [];
     const now = performance.now();
-    const settleMs = plan.messy ? 420 : 320;
-    const tangent = new THREE.Vector3().crossVectors(up, planeNormal).normalize();
-    if (tangent.lengthSq() < 1e-8) tangent.set(0, 0, 1);
+    const settleMs = plan.messy ? 380 : 280;
 
-    for (const fragment of pieces) {
+    // Always wedged-on-block for first-break cleaves; never free-fly dump to the floor.
+    const wedged = true;
+
+    for (let i = 0; i < pieces.length; i++) {
+      const fragment = pieces[i]!;
       scene.add(fragment);
       fragment.updateMatrixWorld(true);
 
-      const body = makeBodyFromMesh(fragment, plan.messy ? 1.15 : 1.35);
+      const body = makeBodyFromMesh(fragment, plan.messy ? 1.15 : 1.35, wedged);
       const offset = new THREE.Vector3().subVectors(fragment.position, worldImpact);
       let side = Math.sign(offset.dot(planeNormal));
-      if (side === 0) side = Math.random() < 0.5 ? 1 : -1;
+      if (side === 0) side = i % 2 === 0 ? 1 : -1;
 
-      // Wedged pose: park halves with a visible crack, mostly still on the stump.
-      const gap = plan.wedgeGap * (plan.messy ? 1 + Math.random() * 0.35 : 1);
-      body.position.x += planeNormal.x * side * gap;
-      body.position.z += planeNormal.z * side * gap;
-      // Keep vertical contact with the block — do not loft into a freefall dump.
-      body.position.y += plan.messy ? 0.012 : 0.006;
+      const baseX = body.position.x;
+      const baseY = body.position.y;
+      const baseZ = body.position.z;
+
+      // Target crack width — messy gets a bit wider / secondary nick offset.
+      let toGap = plan.wedgeGap * (plan.messy ? 1.35 + (i > 1 ? 0.45 : 0) : 1);
+      // Tiny pitch so the crack reads in perspective without tumbling off.
+      const tip = plan.messy ? 0.035 : 0.018;
+      body.quaternion.setFromEuler(planeNormal.z * side * tip, 0, -planeNormal.x * side * tip);
+      fragment.quaternion.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w);
+
+      // Start closed; animate open so it feels like a settle, not a teleport.
+      const fromGap = Math.min(0.006, toGap * 0.15);
+      body.position.set(
+        baseX + planeNormal.x * side * fromGap,
+        baseY + (plan.messy ? 0.004 : 0.002),
+        baseZ + planeNormal.z * side * fromGap,
+      );
       fragment.position.set(body.position.x, body.position.y, body.position.z);
 
-      const boost = plan.impulse * (plan.messy ? 1.15 : 1);
-      const jitter = plan.messy ? 0.08 : 0.02;
-      const kickUp = plan.messy ? 0.045 : 0.012;
-
-      body.velocity.set(
-        planeNormal.x * side * boost + tangent.x * (Math.random() - 0.5) * jitter * boost,
-        kickUp,
-        planeNormal.z * side * boost + tangent.z * (Math.random() - 0.5) * jitter * boost,
-      );
-      body.angularVelocity.set(
-        (Math.random() - 0.5) * boost * (plan.messy ? 0.35 : 0.08),
-        (Math.random() - 0.5) * boost * 0.06,
-        (Math.random() - 0.5) * boost * (plan.messy ? 0.35 : 0.08),
-      );
+      // No launch velocity — pose only.
+      body.velocity.set(0, 0, 0);
+      body.angularVelocity.set(0, 0, 0);
       world.addBody(body);
 
       const childGen = generation + 1;
@@ -356,6 +373,18 @@ export function createFractureWorld(): FractureWorld {
         splittable: isRechopWorthy(diag, childGen),
         bornAt: now,
         settleUntil: now + settleMs,
+        wedge: {
+          normalX: planeNormal.x,
+          normalZ: planeNormal.z,
+          side,
+          fromGap,
+          toGap,
+          startAt: now,
+          durationMs: plan.messy ? 220 : 180,
+          baseX,
+          baseY: baseY + (plan.messy ? 0.004 : 0.002),
+          baseZ,
+        },
       };
       fragment.userData.phys = entry;
       fragment.userData.role = 'fragment';
@@ -419,9 +448,23 @@ export function createFractureWorld(): FractureWorld {
     // Prevent spiral of death
     if (accumulator > FIXED * 2) accumulator = 0;
 
-    // Quick settle: kill residual motion so wedges stay cracked-open on the stump.
     const now = performance.now();
     for (const f of fragments) {
+      // Animate wedged crack opening along the cleave normal.
+      if (f.wedge) {
+        const w = f.wedge;
+        const u = Math.min(1, (now - w.startAt) / Math.max(1, w.durationMs));
+        const ease = u * u * (3 - 2 * u);
+        const gap = w.fromGap + (w.toGap - w.fromGap) * ease;
+        const x = w.baseX + w.normalX * w.side * gap;
+        const z = w.baseZ + w.normalZ * w.side * gap;
+        f.body.position.set(x, w.baseY, z);
+        f.mesh.position.set(x, w.baseY, z);
+        if (u >= 1) f.wedge = undefined;
+        continue;
+      }
+
+      if (f.body.type === CANNON.Body.STATIC) continue;
       if (now < f.settleUntil) continue;
       if (f.body.sleepState === CANNON.Body.SLEEPING) continue;
       const speed = f.body.velocity.length();
@@ -431,7 +474,6 @@ export function createFractureWorld(): FractureWorld {
         f.body.angularVelocity.set(0, 0, 0);
         f.body.sleep();
       } else {
-        // Soft brake if still sliding off — prefer stay-on-block over freefall.
         f.body.velocity.x *= 0.35;
         f.body.velocity.z *= 0.35;
         f.body.velocity.y = Math.min(f.body.velocity.y, 0.05);
