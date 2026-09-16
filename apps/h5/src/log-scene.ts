@@ -89,7 +89,7 @@ export function createLogScene(
   scene.add(logMesh);
 
   const axeAnchor = new THREE.Group();
-  axeAnchor.position.set(1.15, 0.85, 0.55);
+  axeAnchor.position.set(1.45, 0.72, 0.95);
   scene.add(axeAnchor);
   let axeSwingT = -1;
   let axeRestQuat = new THREE.Quaternion();
@@ -234,7 +234,7 @@ export function createLogScene(
     while (axeAnchor.children.length) axeAnchor.remove(axeAnchor.children[0]!);
     if (!root) return;
     const clone = root.clone(true);
-    clone.rotation.set(0.2, -0.6, 0.35);
+    clone.rotation.set(-1.15, 0.35, 0.25);
     axeAnchor.add(clone);
     axeRestQuat.copy(axeAnchor.quaternion);
   }
