@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { isRechopWorthy, planFracture } from './fracture-plan.ts';
+import { cleaveNormalXZ, isRechopWorthy, planFracture } from './fracture-plan.ts';
 
 describe('planFracture', () => {
   it('too_light is nick-only with zero fragments', () => {
@@ -8,28 +8,30 @@ describe('planFracture', () => {
     assert.equal(p.fragmentCount, 0);
     assert.equal(p.nickOnly, true);
     assert.equal(p.messy, false);
+    assert.equal(p.splitStyle, 'nick');
   });
 
-  it('sweet requests a moderate fragment budget', () => {
+  it('sweet is a clean 2-way directional cleave', () => {
     const p = planFracture({
       outcome: 'sweet',
       axe: { weight: 0.5, edge: 0.6 },
     });
-    assert.ok(p.fragmentCount >= 6 && p.fragmentCount <= 22);
+    assert.equal(p.fragmentCount, 2);
     assert.equal(p.nickOnly, false);
     assert.equal(p.messy, false);
+    assert.equal(p.splitStyle, 'cleave');
     assert.ok(p.impulse > 0);
-    // Feel polish: modest impulse so chips settle instead of exploding
     assert.ok(p.impulse < 2.2);
   });
 
-  it('too_heavy is messier with more fragments and impulse than sweet', () => {
+  it('too_heavy is messier with more fragments than sweet, still cleave', () => {
     const axe = { weight: 0.7, edge: 0.85 };
     const sweet = planFracture({ outcome: 'sweet', axe });
     const heavy = planFracture({ outcome: 'too_heavy', axe });
     assert.ok(heavy.fragmentCount >= sweet.fragmentCount);
     assert.ok(heavy.impulse > sweet.impulse);
     assert.equal(heavy.messy, true);
+    assert.equal(heavy.splitStyle, 'cleave_messy');
     assert.ok(heavy.impulse < 3.5);
   });
 
@@ -39,13 +41,28 @@ describe('planFracture', () => {
       weakDevice: true,
       axe: { weight: 1, edge: 1 },
     });
-    assert.ok(p.fragmentCount <= 12);
+    assert.ok(p.fragmentCount <= 6);
   });
 
-  it('later generations reduce fragment budget', () => {
-    const g0 = planFracture({ outcome: 'sweet', generation: 0 });
-    const g1 = planFracture({ outcome: 'sweet', generation: 1 });
+  it('later generations reduce heavy fragment budget', () => {
+    const g0 = planFracture({ outcome: 'too_heavy', generation: 0 });
+    const g1 = planFracture({ outcome: 'too_heavy', generation: 1 });
     assert.ok(g1.fragmentCount <= g0.fragmentCount);
+  });
+});
+
+describe('cleaveNormalXZ', () => {
+  it('returns a unit normal perpendicular to the radial in XZ', () => {
+    const [nx, nz] = cleaveNormalXZ(1, 0, 0, 0);
+    assert.ok(Math.abs(Math.hypot(nx, nz) - 1) < 1e-9);
+    // radial = (1,0) → normal = (0,1) or (0,-1) depending on cross convention
+    assert.ok(Math.abs(nx) < 1e-9);
+    assert.ok(Math.abs(Math.abs(nz) - 1) < 1e-9);
+  });
+
+  it('falls back when aim is on the axis', () => {
+    const [nx, nz] = cleaveNormalXZ(0, 0, 0, 0);
+    assert.ok(Math.abs(Math.hypot(nx, nz) - 1) < 1e-9);
   });
 });
 

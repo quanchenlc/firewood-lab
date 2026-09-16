@@ -126,9 +126,9 @@ function setPhase(next: Phase): void {
   } else if (next === 'power') {
     phaseHint.textContent = '已瞄准 — 调节力道后劈下';
   } else if (lastOutcome === 'sweet') {
-    phaseHint.textContent = 'Voronoi 劈开了！';
+    phaseHint.textContent = '顺着劈面打开了！';
   } else if (lastOutcome === 'too_heavy') {
-    phaseHint.textContent = '力道过猛，碎得更散';
+    phaseHint.textContent = '力道过猛，碎块更多但仍向两侧';
   } else {
     phaseHint.textContent = '再调整力道，或重瞄再试';
   }

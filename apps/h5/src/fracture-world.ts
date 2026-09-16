@@ -1,9 +1,11 @@
 import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
-import { DestructibleMesh, FractureOptions } from '@dgreenheck/three-pinata';
+import { DestructibleMesh, FractureOptions, SliceOptions } from '@dgreenheck/three-pinata';
 import {
+  cleaveNormalXZ,
   isRechopWorthy,
   MAX_LIVE_FRAGMENTS,
+  MIN_RECHOP_DIAGONAL,
   TINY_CHIP_DIAGONAL,
   type FracturePlan,
 } from '@firewood/game-core';
@@ -95,6 +97,8 @@ export function createFractureWorld(): FractureWorld {
   const fragments: PhysFragment[] = [];
   let accumulator = 0;
   const FIXED = 1 / 60;
+  const up = new THREE.Vector3(0, 1, 0);
+  const sliceOpts = new SliceOptions();
 
   function bboxDiagonal(mesh: THREE.Mesh): number {
     const box = new THREE.Box3().setFromObject(mesh);
@@ -176,6 +180,181 @@ export function createFractureWorld(): FractureWorld {
     }
   }
 
+  /**
+   * Vertical chop plane through impact: halves separate along ±normal (sides),
+   * then gravity takes over — not a spherical Voronoi burst.
+   */
+  function buildCleaveNormal(mesh: THREE.Object3D, worldImpact: THREE.Vector3): THREE.Vector3 {
+    const box = new THREE.Box3().setFromObject(mesh);
+    const center = box.getCenter(new THREE.Vector3());
+    const [nx, nz] = cleaveNormalXZ(worldImpact.x, worldImpact.z, center.x, center.z);
+    return new THREE.Vector3(nx, 0, nz);
+  }
+
+  /** Recursively planar-slice until we hit the piece budget (messy) or once (sweet). */
+  function cleavePieces(
+    root: DestructibleMesh,
+    worldImpact: THREE.Vector3,
+    planeNormal: THREE.Vector3,
+    plan: FracturePlan,
+  ): DestructibleMesh[] {
+    const primary = root.sliceWorld(planeNormal, worldImpact, sliceOpts);
+    if (!plan.messy || plan.fragmentCount <= 2 || primary.length === 0) {
+      return primary;
+    }
+
+    const leaves: DestructibleMesh[] = [];
+    const queue: DestructibleMesh[] = [...primary];
+
+    while (queue.length > 0 && leaves.length + queue.length < plan.fragmentCount) {
+      // Split largest remaining piece next
+      queue.sort((a, b) => bboxDiagonal(b) - bboxDiagonal(a));
+      const piece = queue.shift()!;
+      const diag = bboxDiagonal(piece);
+      if (diag < MIN_RECHOP_DIAGONAL * 0.85) {
+        leaves.push(piece);
+        continue;
+      }
+
+      const angle = (Math.random() - 0.5) * (plan.messy ? 0.55 : 0.25);
+      const n2 = planeNormal.clone().applyAxisAngle(up, angle).normalize();
+      n2.y = 0;
+      if (n2.lengthSq() < 1e-8) n2.copy(planeNormal);
+      else n2.normalize();
+
+      const origin = worldImpact
+        .clone()
+        .add(n2.clone().multiplyScalar((Math.random() - 0.5) * 0.1));
+      origin.y = worldImpact.y;
+
+      try {
+        piece.updateMatrixWorld(true);
+        const sub = piece.sliceWorld(n2, origin, sliceOpts);
+        if (sub.length >= 2) {
+          disposeMesh(piece, false);
+          queue.push(...sub);
+        } else {
+          leaves.push(piece);
+        }
+      } catch {
+        leaves.push(piece);
+      }
+    }
+
+    leaves.push(...queue);
+    return leaves;
+  }
+
+  /** Fallback: 2.5D Voronoi extruded along grain (Y) with seeds biased to two sides of the plane. */
+  function voronoiCleaveFallback(
+    mesh: DestructibleMesh,
+    worldImpact: THREE.Vector3,
+    planeNormal: THREE.Vector3,
+    plan: FracturePlan,
+  ): DestructibleMesh[] {
+    mesh.updateMatrixWorld(true);
+    const localImpact = mesh.worldToLocal(worldImpact.clone());
+    const localNormal = planeNormal
+      .clone()
+      .transformDirection(new THREE.Matrix4().copy(mesh.matrixWorld).invert())
+      .normalize();
+    localNormal.y = 0;
+    if (localNormal.lengthSq() < 1e-8) localNormal.set(1, 0, 0);
+    else localNormal.normalize();
+
+    const box = new THREE.Box3().setFromObject(mesh);
+    const size = box.getSize(new THREE.Vector3());
+    const count = Math.max(2, plan.fragmentCount);
+    const seedPoints: THREE.Vector3[] = [];
+    for (let i = 0; i < count; i++) {
+      const side = i % 2 === 0 ? 1 : -1;
+      const along = (Math.random() - 0.5) * size.x * 0.35;
+      const lateral = side * (0.04 + Math.random() * 0.12);
+      const y = localImpact.y + (Math.random() - 0.5) * size.y * 0.35;
+      const tangent = new THREE.Vector3(-localNormal.z, 0, localNormal.x);
+      seedPoints.push(
+        localImpact
+          .clone()
+          .add(localNormal.clone().multiplyScalar(lateral))
+          .add(tangent.multiplyScalar(along))
+          .setY(y),
+      );
+    }
+
+    const options = new FractureOptions({
+      fractureMethod: 'voronoi',
+      fragmentCount: count,
+      seed: Math.floor(Math.random() * 1e9),
+      voronoiOptions: {
+        mode: '2.5D',
+        seedPoints,
+        impactPoint: localImpact,
+        impactRadius: plan.impactRadius,
+        projectionAxis: 'y',
+      },
+    });
+
+    return mesh.fracture(options);
+  }
+
+  function registerPieces(
+    pieces: DestructibleMesh[],
+    worldImpact: THREE.Vector3,
+    planeNormal: THREE.Vector3,
+    plan: FracturePlan,
+    generation: number,
+    scene: THREE.Scene,
+  ): PhysFragment[] {
+    const created: PhysFragment[] = [];
+    const now = performance.now();
+    const tangent = new THREE.Vector3().crossVectors(up, planeNormal).normalize();
+    if (tangent.lengthSq() < 1e-8) tangent.set(0, 0, 1);
+
+    for (const fragment of pieces) {
+      scene.add(fragment);
+      fragment.updateMatrixWorld(true);
+
+      const body = makeBodyFromMesh(fragment, plan.messy ? 0.9 : 1.05);
+      const offset = new THREE.Vector3().subVectors(fragment.position, worldImpact);
+      let side = Math.sign(offset.dot(planeNormal));
+      if (side === 0) side = Math.random() < 0.5 ? 1 : -1;
+
+      const boost = plan.impulse * (plan.messy ? 1.12 : 1);
+      const jitter = plan.messy ? 0.22 : 0.06;
+      const kickUp = plan.messy ? 0.28 : 0.12;
+
+      // Two-sided lateral impulse along cleave normal — open sideways, then fall
+      body.velocity.set(
+        planeNormal.x * side * boost + tangent.x * (Math.random() - 0.5) * jitter * boost,
+        kickUp + Math.random() * 0.15,
+        planeNormal.z * side * boost + tangent.z * (Math.random() - 0.5) * jitter * boost,
+      );
+      body.angularVelocity.set(
+        (Math.random() - 0.5) * boost * (plan.messy ? 0.55 : 0.25),
+        (Math.random() - 0.5) * boost * 0.2,
+        (Math.random() - 0.5) * boost * (plan.messy ? 0.55 : 0.25),
+      );
+      body.position.y += 0.04;
+      world.addBody(body);
+
+      const childGen = generation + 1;
+      const diag = bboxDiagonal(fragment);
+      const entry: PhysFragment = {
+        mesh: fragment,
+        body,
+        generation: childGen,
+        splittable: isRechopWorthy(diag, childGen),
+        bornAt: now,
+      };
+      fragment.userData.phys = entry;
+      fragment.userData.role = 'fragment';
+      fragment.userData.generation = childGen;
+      fragments.push(entry);
+      created.push(entry);
+    }
+    return created;
+  }
+
   function fractureMesh(
     mesh: DestructibleMesh,
     worldImpact: THREE.Vector3,
@@ -183,79 +362,32 @@ export function createFractureWorld(): FractureWorld {
     generation: number,
     scene: THREE.Scene,
   ): PhysFragment[] {
-    if (plan.fragmentCount <= 0) return [];
+    if (plan.fragmentCount <= 0 || plan.nickOnly) return [];
 
     mesh.updateMatrixWorld(true);
-    const localImpact = mesh.worldToLocal(worldImpact.clone());
-
-    const options = new FractureOptions({
-      fractureMethod: 'voronoi',
-      fragmentCount: plan.fragmentCount,
-      seed: Math.floor(Math.random() * 1e9),
-      voronoiOptions: {
-        mode: '3D',
-        impactPoint: localImpact,
-        impactRadius: plan.impactRadius,
-      },
-    });
+    const planeNormal = buildCleaveNormal(mesh, worldImpact);
 
     const existingIdx = fragments.findIndex((f) => f.mesh === mesh);
     if (existingIdx >= 0) {
       removeFragment(existingIdx);
     }
 
-    const created: PhysFragment[] = [];
-    const now = performance.now();
+    let pieces: DestructibleMesh[] = [];
     try {
-      mesh.fracture(options, (fragment) => {
-        scene.add(fragment);
-        fragment.updateMatrixWorld(true);
-
-        const body = makeBodyFromMesh(fragment, plan.messy ? 0.9 : 1.05);
-        const away = new THREE.Vector3().subVectors(fragment.position, worldImpact);
-        if (away.lengthSq() < 1e-6) {
-          away.set(Math.random() - 0.5, 0.2, Math.random() - 0.5);
-        }
-        away.y = Math.max(0.05, away.y);
-        away.normalize();
-
-        // Prefer lateral split; keep upward kick small so pieces land on stump
-        const boost = plan.impulse * (plan.messy ? 1.15 : 1);
-        const jitter = plan.messy ? 0.28 : 0.12;
-        const up = plan.messy ? 0.35 : 0.18;
-        body.velocity.set(
-          away.x * boost + (Math.random() - 0.5) * jitter * boost,
-          up + Math.random() * 0.2,
-          away.z * boost + (Math.random() - 0.5) * jitter * boost,
-        );
-        body.angularVelocity.set(
-          (Math.random() - 0.5) * boost * 0.7,
-          (Math.random() - 0.5) * boost * 0.45,
-          (Math.random() - 0.5) * boost * 0.7,
-        );
-        // Lift slightly to reduce ground tunneling on spawn
-        body.position.y += 0.04;
-        world.addBody(body);
-
-        const childGen = generation + 1;
-        const diag = bboxDiagonal(fragment);
-        const entry: PhysFragment = {
-          mesh: fragment,
-          body,
-          generation: childGen,
-          splittable: isRechopWorthy(diag, childGen),
-          bornAt: now,
-        };
-        fragment.userData.phys = entry;
-        fragment.userData.role = 'fragment';
-        fragment.userData.generation = childGen;
-        fragments.push(entry);
-        created.push(entry);
-      });
+      pieces = cleavePieces(mesh, worldImpact, planeNormal, plan);
     } catch (err) {
-      console.error('[fracture] Voronoi failed', err);
-      return created;
+      console.warn('[fracture] planar cleave failed, trying grain-biased Voronoi', err);
+      try {
+        pieces = voronoiCleaveFallback(mesh, worldImpact, planeNormal, plan);
+      } catch (err2) {
+        console.error('[fracture] cleave fallback failed', err2);
+        return [];
+      }
     }
+
+    if (pieces.length === 0) return [];
+
+    const created = registerPieces(pieces, worldImpact, planeNormal, plan, generation, scene);
 
     mesh.visible = false;
     mesh.removeFromParent();
