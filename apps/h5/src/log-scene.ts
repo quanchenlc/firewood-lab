@@ -127,11 +127,11 @@ export function createLogScene(
   let logMesh = createLogProxy();
   scene.add(logMesh);
 
-  const axeRestPos = new THREE.Vector3(1.35, logCenterY + 0.55, 0.85);
+  const axeRestPos = new THREE.Vector3(1.55, logCenterY + 0.65, 1.15);
   const axeAnchor = new THREE.Group();
   axeAnchor.position.copy(axeRestPos);
   // Standing-chop rest: handle near vertical, slight forward lean toward the log.
-  axeAnchor.rotation.set(0.18, -0.35, 0);
+  axeAnchor.rotation.set(0.12, -0.55, 0);
   scene.add(axeAnchor);
   let axeSwingT = -1;
   let axeRestQuat = new THREE.Quaternion().copy(axeAnchor.quaternion);
@@ -304,7 +304,7 @@ export function createLogScene(
     // Same grip convention for every axe model: handle ~+Y, bit -Y.
     axeAnchor.add(clone);
     axeAnchor.position.copy(axeRestPos);
-    axeAnchor.rotation.set(0.18, -0.35, 0);
+    axeAnchor.rotation.set(0.12, -0.55, 0);
     axeRestQuat.copy(axeAnchor.quaternion);
     axeFade = 1;
     setAxeOpacity(1);
@@ -368,15 +368,15 @@ export function createLogScene(
         const ease = u * u * (3 - 2 * u);
         axeAnchor.position.lerpVectors(axeRaisedPos, axeImpactPos, ease);
         // Raised lean back → impact nearly vertical with slight forward lean
-        const raisedX = -0.55;
-        const impactX = 0.12;
-        axeAnchor.rotation.set(raisedX + (impactX - raisedX) * ease, -0.2, 0);
+        const raisedX = -0.35;
+        const impactX = 0.08;
+        axeAnchor.rotation.set(raisedX + (impactX - raisedX) * ease, -0.25, 0);
         axeFade = 1;
         setAxeOpacity(1);
       } else {
         const u = (t - 0.55) / 0.45;
         axeAnchor.position.lerpVectors(axeImpactPos, axeRestPos, u);
-        axeAnchor.rotation.set(0.12 + 0.06 * u, -0.35, 0);
+        axeAnchor.rotation.set(0.12 + 0.0 * u, -0.55, 0);
         axeFade = 1 - u;
         setAxeOpacity(Math.max(0.05, axeFade));
       }
@@ -384,7 +384,7 @@ export function createLogScene(
         axeSwingT = -1;
         axeAnchor.position.copy(axeRestPos);
         axeAnchor.quaternion.copy(axeRestQuat);
-        axeAnchor.rotation.set(0.18, -0.35, 0);
+        axeAnchor.rotation.set(0.12, -0.55, 0);
         axeFade = 1;
         setAxeOpacity(1);
       }
