@@ -34,14 +34,41 @@ export interface LogScene {
   findFragment(mesh: THREE.Object3D): PhysFragment | undefined;
 }
 
+/** Log height (Y) for upright round sitting on the stump. */
+const LOG_HEIGHT = 0.7;
+const LOG_RADIUS_TOP = 0.36;
+const LOG_RADIUS_BOT = 0.4;
+
 /**
- * Fracture proxy: low-poly cylinder (Voronoi-friendly).
+ * Fracture proxy: low-poly cylinder (Voronoi/slice-friendly).
+ * Rest pose is upright — cut face up, axis near world +Y (like screen.toys/firewood).
  * Visual stump is a separate dense GLB underneath — too heavy to fracture directly (~33k verts).
  */
 function buildLogGeometry(): THREE.BufferGeometry {
-  const geo = new THREE.CylinderGeometry(0.38, 0.4, 1.05, 20, 3);
-  geo.rotateZ(Math.PI / 2);
-  return geo;
+  // CylinderGeometry default: axis = +Y, caps on top/bottom (end-grain).
+  return new THREE.CylinderGeometry(LOG_RADIUS_TOP, LOG_RADIUS_BOT, LOG_HEIGHT, 20, 3);
+}
+
+/**
+ * Poly Haven axes are already handle-along-Y. Put the heavier/head end at -Y
+ * so a standing chop reads as bit-down into the wood.
+ */
+function orientAxeBitDown(root: THREE.Object3D): void {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root);
+  const center = box.getCenter(new THREE.Vector3());
+  const upExtent = box.max.y - center.y;
+  const downExtent = center.y - box.min.y;
+  // If more of the mesh sits above center, head is likely on +Y → flip bit down.
+  if (upExtent >= downExtent * 0.92) {
+    root.rotateZ(Math.PI);
+  }
+  root.updateMatrixWorld(true);
+  const box2 = new THREE.Box3().setFromObject(root);
+  const c2 = box2.getCenter(new THREE.Vector3());
+  root.position.x -= c2.x;
+  root.position.y -= c2.y;
+  root.position.z -= c2.z;
 }
 
 export function createLogScene(
@@ -69,7 +96,7 @@ export function createLogScene(
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 50);
   let yaw = 0.7;
   let pitch = 0.38;
-  const lookAt = new THREE.Vector3(0, 0.55, 0);
+  const lookAt = new THREE.Vector3(0, 0.7, 0);
   const camRadius = 4.4;
 
   scene.add(new THREE.HemisphereLight(0xfff0dd, 0x2a1e14, 0.85));
@@ -87,20 +114,31 @@ export function createLogScene(
   ground.rotation.x = -Math.PI / 2;
   scene.add(ground);
 
-  // Real stump GLB (visual only)
+  // Real stump GLB (visual only) — Poly Haven tree_stump_02 is already upright (Y = height).
   const stump = stumpModel;
   stump.position.set(0, 0.26, 0);
   scene.add(stump);
+
+  // Sit choppable round on stump top (~0.53 after normalize + lift).
+  const stumpTopY = 0.53;
+  const logCenterY = stumpTopY + LOG_HEIGHT * 0.5 + 0.02;
 
   let mats: SpeciesMaterials | null = null;
   let logMesh = createLogProxy();
   scene.add(logMesh);
 
+  const axeRestPos = new THREE.Vector3(1.35, logCenterY + 0.55, 0.85);
   const axeAnchor = new THREE.Group();
-  axeAnchor.position.set(1.45, 0.72, 0.95);
+  axeAnchor.position.copy(axeRestPos);
+  // Standing-chop rest: handle near vertical, slight forward lean toward the log.
+  axeAnchor.rotation.set(0.18, -0.35, 0);
   scene.add(axeAnchor);
   let axeSwingT = -1;
-  let axeRestQuat = new THREE.Quaternion();
+  let axeRestQuat = new THREE.Quaternion().copy(axeAnchor.quaternion);
+  const axeSwingAim = new THREE.Vector3();
+  const axeImpactPos = new THREE.Vector3();
+  const axeRaisedPos = new THREE.Vector3();
+  let axeFade = 1;
 
   const marker = new THREE.Mesh(
     new THREE.SphereGeometry(0.05, 14, 14),
@@ -146,7 +184,7 @@ export function createLogScene(
       mats?.inner ?? new THREE.MeshStandardMaterial({ color: 0xc4a574, roughness: 0.9 });
     const mesh = new DestructibleMesh(buildLogGeometry(), outer[0]!, inner);
     mesh.material = outer;
-    mesh.position.set(0, 0.92, 0);
+    mesh.position.set(0, logCenterY, 0);
     mesh.userData.role = 'log';
     mesh.userData.generation = 0;
     return mesh;
@@ -243,18 +281,43 @@ export function createLogScene(
     }
   }
 
+  function setAxeOpacity(opacity: number): void {
+    axeAnchor.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const raw of mats) {
+        const mat = raw as THREE.MeshStandardMaterial;
+        if (!mat) continue;
+        mat.transparent = opacity < 0.999;
+        mat.opacity = opacity;
+        mat.depthWrite = opacity > 0.85;
+      }
+    });
+  }
+
   function setAxeVisual(root: THREE.Object3D | null): void {
     while (axeAnchor.children.length) axeAnchor.remove(axeAnchor.children[0]!);
     if (!root) return;
     const clone = root.clone(true);
-    clone.rotation.set(-1.15, 0.35, 0.25);
+    orientAxeBitDown(clone);
+    // Same grip convention for every axe model: handle ~+Y, bit -Y.
     axeAnchor.add(clone);
+    axeAnchor.position.copy(axeRestPos);
+    axeAnchor.rotation.set(0.18, -0.35, 0);
     axeRestQuat.copy(axeAnchor.quaternion);
+    axeFade = 1;
+    setAxeOpacity(1);
   }
 
   function playAxeSwing(aimPoint: THREE.Vector3): void {
-    axeAnchor.lookAt(aimPoint);
+    axeSwingAim.copy(aimPoint);
+    // Hover just above the aim so the bit reads as striking into the wood.
+    axeImpactPos.set(aimPoint.x, aimPoint.y + 0.42, aimPoint.z);
+    axeRaisedPos.set(aimPoint.x * 0.35 + axeRestPos.x * 0.65, aimPoint.y + 1.15, aimPoint.z * 0.35 + axeRestPos.z * 0.65);
     axeSwingT = 0;
+    axeFade = 1;
+    setAxeOpacity(1);
   }
 
   function punchScale(amount = 0.12): void {
@@ -297,12 +360,33 @@ export function createLogScene(
 
     if (axeSwingT >= 0) {
       axeSwingT += dt;
-      const t = Math.min(1, axeSwingT / 0.28);
-      axeAnchor.rotation.x = -0.9 * Math.sin(t * Math.PI);
+      const duration = 0.48;
+      const t = Math.min(1, axeSwingT / duration);
+      // 0–0.55: raise→impact (handle upright, bit down). 0.55–1: retract + fade.
+      if (t < 0.55) {
+        const u = t / 0.55;
+        const ease = u * u * (3 - 2 * u);
+        axeAnchor.position.lerpVectors(axeRaisedPos, axeImpactPos, ease);
+        // Raised lean back → impact nearly vertical with slight forward lean
+        const raisedX = -0.55;
+        const impactX = 0.12;
+        axeAnchor.rotation.set(raisedX + (impactX - raisedX) * ease, -0.2, 0);
+        axeFade = 1;
+        setAxeOpacity(1);
+      } else {
+        const u = (t - 0.55) / 0.45;
+        axeAnchor.position.lerpVectors(axeImpactPos, axeRestPos, u);
+        axeAnchor.rotation.set(0.12 + 0.06 * u, -0.35, 0);
+        axeFade = 1 - u;
+        setAxeOpacity(Math.max(0.05, axeFade));
+      }
       if (t >= 1) {
         axeSwingT = -1;
+        axeAnchor.position.copy(axeRestPos);
         axeAnchor.quaternion.copy(axeRestQuat);
-        axeAnchor.rotation.set(0, 0, 0);
+        axeAnchor.rotation.set(0.18, -0.35, 0);
+        axeFade = 1;
+        setAxeOpacity(1);
       }
     }
 

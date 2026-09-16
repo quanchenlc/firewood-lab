@@ -16,6 +16,7 @@ export type { FractureHook, FractureHookContext } from './hooks.ts';
 
 export {
   planFracture,
+  cleaveNormalXZ,
   isRechopWorthy,
   MIN_RECHOP_DIAGONAL,
   MAX_LIVE_FRAGMENTS,
@@ -23,4 +24,5 @@ export {
   type FracturePlan,
   type FracturePlanInput,
   type FractureAxeStats,
+  type SplitStyle,
 } from './fracture-plan.ts';

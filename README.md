@@ -22,7 +22,8 @@ pnpm --filter @firewood/h5 dev
 
 - 切换树种会更换树皮 / 断面贴图（Poly Haven CC0）
 - `too_light`：浅痕，不碎裂
-- `sweet` / `too_heavy`：**Voronoi 多碎片** + cannon-es 物理落下
+- `sweet`：沿瞄准点**竖向劈面**干净劈开，碎块向两侧分开再落下
+- `too_heavy`：仍是定向劈面，但碎块更多更乱
 - 可点击较大碎块继续劈，或「再来一斧」重置
 
 其他常用命令：
@@ -64,9 +65,11 @@ scripts/pull-assets.mjs  # 从 Poly Haven API 拉取 1K 贴图与 GLTF
 
 | 层 | 选择 |
 |----|------|
-| Voronoi | `@dgreenheck/three-pinata` |
-| 物理 | `cannon-es`（AABB Box 近似） |
-| 预算 | `planFracture()` |
+| 主路径 | `DestructibleMesh.sliceWorld` — 过瞄准点的竖向劈面（grain / up） |
+| 过猛 | 同劈面递归二次剖分，碎块仍沿 ±法向侧向冲量 |
+| 回退 | 2.5D Voronoi（沿 Y 挤出）+ 劈面两侧种子点 |
+| 物理 | `cannon-es`（AABB Box 近似）+ 双侧侧向 impulse |
+| 预算 | `planFracture()` → `splitStyle: cleave \| cleave_messy \| nick` |
 
 ## 平台路线
 
