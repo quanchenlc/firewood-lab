@@ -18,9 +18,10 @@ pnpm --filter @firewood/h5 dev
 
 首次需要在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**（点一次即可）。之后推送到 `main` 或 `cursor/**` 分支会自动构建并部署 `apps/h5/dist`。
 
-玩法循环：选树种/斧头 → **点击木头瞄准** → 调力道 → **劈下去** →
+玩法循环：选树种/斧头 → **点击木头瞄准** → 节奏力道条指针往返 → **按下定格** →
 
 - 切换树种会更换树皮 / 断面贴图（Poly Haven CC0）
+- 力道条绿带由硬度 × 斧头属性决定（不总在正中）；指针自动往返，按下瞬间取样
 - `too_light`：浅痕，不碎裂
 - `sweet`：沿瞄准点**竖向劈面**干净劈开，碎块向两侧分开再落下
 - `too_heavy`：仍是定向劈面，但碎块更多更乱

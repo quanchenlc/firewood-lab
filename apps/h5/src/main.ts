@@ -18,7 +18,7 @@ import { createLogScene, tintLog } from './log-scene';
 type Phase = 'aim' | 'power' | 'result';
 
 const platform = createH5Platform();
-platform.storage.setItem('firewood.h5.loop', 'feel-polish-v1');
+platform.storage.setItem('firewood.h5.loop', 'rhythm-force-v1');
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
 const flashEl = document.querySelector<HTMLDivElement>('#flash')!;
@@ -31,7 +31,7 @@ const axeSelect = document.querySelector<HTMLSelectElement>('#axe')!;
 const speciesMeta = document.querySelector<HTMLParagraphElement>('#species-meta')!;
 const axeMeta = document.querySelector<HTMLParagraphElement>('#axe-meta')!;
 const powerPanel = document.querySelector<HTMLDivElement>('#power-panel')!;
-const slider = document.querySelector<HTMLInputElement>('#slider')!;
+const rhythmKnob = document.querySelector<HTMLDivElement>('#rhythm-knob')!;
 const sliderValue = document.querySelector<HTMLOutputElement>('#slider-value')!;
 const sweetZone = document.querySelector<HTMLDivElement>('#sweet-zone')!;
 const forcePreview = document.querySelector<HTMLParagraphElement>('#force-preview')!;
@@ -92,6 +92,12 @@ let aimGeneration = 0;
 let lastOutcome: ChopOutcome | null = null;
 let speciesBusy = false;
 let tabHidden = typeof document !== 'undefined' && document.hidden;
+/** Locked force sample used by doChop (set on pointerdown). */
+let lockedSlider01 = 0.5;
+/** Live rhythm pointer in [0, 1], auto ping-pong while aiming power. */
+let rhythm01 = 0.5;
+let rhythmPhase = 0;
+let chopping = false;
 
 function refreshMeta(): void {
   const sp = currentSpecies();
@@ -103,9 +109,9 @@ function refreshMeta(): void {
     phase === 'aim'
       ? '点木头（或剩余大块）瞄准；拖动画布可绕转。'
       : phase === 'power'
-        ? '绿带是合适力道；拖动滑条可看预计结果。'
+        ? '绿带随树种/斧头移动；看准后按下「定格劈下」（按下瞬间取样）。'
         : lastOutcome === 'too_light'
-          ? '力道太轻，只留下浅痕。加大力道或换斧再试。'
+          ? '力道太轻，只留下浅痕。再瞄一次，绿带里定格。'
           : '碎片会落下；可点较大碎块继续劈，或「再来一斧」重置。';
   updateForceUi();
 }
@@ -124,19 +130,23 @@ function setPhase(next: Phase): void {
       resultEl.className = 'result';
     }
   } else if (next === 'power') {
-    phaseHint.textContent = '已瞄准 — 调节力道后劈下';
+    phaseHint.textContent = '已瞄准 — 指针往返时按下定格';
+    // Keep phase continuity; don't hard-reset so re-aim feels fluid
   } else if (lastOutcome === 'sweet') {
     phaseHint.textContent = '顺着劈面打开了！';
   } else if (lastOutcome === 'too_heavy') {
     phaseHint.textContent = '力道过猛，碎块更多但仍向两侧';
   } else {
-    phaseHint.textContent = '再调整力道，或重瞄再试';
+    phaseHint.textContent = '再调整时机，或重瞄再试';
   }
   refreshMeta();
 }
 
-function slider01(): number {
-  return Number(slider.value) / 100;
+/** Full sine cycles per second — slightly faster for harder wood / duller axe. */
+function rhythmHz(): number {
+  const sp = currentSpecies();
+  const axe = currentAxe();
+  return 0.42 + sp.hardness * 0.38 + (1 - axe.sharpness) * 0.28;
 }
 
 function updateSweetZone(): void {
@@ -154,7 +164,7 @@ function updateForcePreview(): void {
     return;
   }
   const outcome = resolveChop({
-    slider01: slider01(),
+    slider01: rhythm01,
     species: currentSpecies(),
     axe: currentAxe(),
   });
@@ -165,7 +175,15 @@ function updateForcePreview(): void {
 function updateForceUi(): void {
   updateSweetZone();
   updateForcePreview();
-  sliderValue.textContent = slider01().toFixed(2);
+  sliderValue.textContent = rhythm01.toFixed(2);
+  rhythmKnob.style.left = `${rhythm01 * 100}%`;
+}
+
+function tickRhythm(dt: number): void {
+  if (phase !== 'power' || chopping) return;
+  rhythmPhase += dt * rhythmHz() * Math.PI * 2;
+  rhythm01 = 0.5 + 0.5 * Math.sin(rhythmPhase);
+  updateForceUi();
 }
 
 function buzz(outcome: ChopOutcome): void {
@@ -212,10 +230,12 @@ function aimAt(clientX: number, clientY: number): boolean {
 }
 
 function doChop(): void {
-  if (phase !== 'power' || !aimPoint || !aimTarget) return;
+  if (phase !== 'power' || !aimPoint || !aimTarget || chopping) return;
+  chopping = true;
+  lockedSlider01 = rhythm01;
   const sp = currentSpecies();
   const axe = currentAxe();
-  const outcome = resolveChop({ slider01: slider01(), species: sp, axe });
+  const outcome = resolveChop({ slider01: lockedSlider01, species: sp, axe });
   lastOutcome = outcome;
   resultEl.textContent = labels[outcome];
   resultEl.className = `result ${outcome}`;
@@ -246,6 +266,7 @@ function doChop(): void {
   aimTarget = null;
   setPhase('result');
   window.setTimeout(() => {
+    chopping = false;
     if (phase === 'result') setPhase('aim');
   }, 700);
 }
@@ -281,20 +302,15 @@ axeSelect.addEventListener('change', () => {
   refreshMeta();
 });
 
-slider.addEventListener('input', () => updateForceUi());
-chopBtn.addEventListener('click', () => doChop());
-let chopPressedAt = 0;
-chopBtn.addEventListener('pointerdown', () => {
-  if (phase === 'power') chopPressedAt = performance.now();
+// Sample force on pointerdown (not release) — rhythm timing lock.
+chopBtn.addEventListener('pointerdown', (e) => {
+  if (phase !== 'power') return;
+  e.preventDefault();
+  doChop();
 });
-chopBtn.addEventListener('pointerup', () => {
-  if (phase !== 'power' || !chopPressedAt) return;
-  const held = performance.now() - chopPressedAt;
-  chopPressedAt = 0;
-  if (held >= 180) doChop();
-});
-chopBtn.addEventListener('pointercancel', () => {
-  chopPressedAt = 0;
+chopBtn.addEventListener('click', (e) => {
+  // Prevent synthetic click after pointerdown from double-firing on some browsers.
+  e.preventDefault();
 });
 resetAimBtn.addEventListener('click', () => {
   aimPoint = null;
@@ -360,6 +376,7 @@ function frame(now: number): void {
   }
   const dt = Math.min(0.05, (now - prev) / 1000);
   prev = now;
+  tickRhythm(dt);
   logScene.update(dt);
   logScene.renderer.render(logScene.scene, logScene.camera);
 }

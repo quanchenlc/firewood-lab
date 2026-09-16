@@ -186,10 +186,6 @@ select {
   padding: 8px 10px;
 }
 
-input[type='range'] {
-  accent-color: var(--accent);
-}
-
 output {
   min-width: 2.5rem;
   text-align: right;
@@ -219,32 +215,67 @@ output {
   pointer-events: none;
 }
 
-.slider-wrap {
+.rhythm-row {
+  grid-template-columns: 48px 1fr auto;
+}
+
+.rhythm-bar {
   position: relative;
   width: 100%;
-  height: 28px;
+  height: 36px;
   display: flex;
   align-items: center;
+  touch-action: none;
+  user-select: none;
+}
+
+.rhythm-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(212, 165, 116, 0.28);
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .sweet-zone {
   position: absolute;
   left: 0;
-  height: 10px;
-  border-radius: 6px;
-  background: rgba(143, 191, 122, 0.45);
-  border: 1px solid rgba(143, 191, 122, 0.65);
+  height: 14px;
+  border-radius: 7px;
+  background: rgba(143, 191, 122, 0.42);
+  border: 1px solid rgba(143, 191, 122, 0.7);
   pointer-events: none;
   top: 50%;
   transform: translateY(-50%);
   min-width: 4px;
+  z-index: 1;
 }
 
-.slider-wrap input[type='range'] {
-  position: relative;
-  z-index: 1;
-  width: 100%;
+.rhythm-knob {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #f0d2a8, #d4a574);
+  border: 2px solid #1a120c;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  transform: translateY(-50%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.rhythm-hint {
   margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
 }
 
 .force-preview {
