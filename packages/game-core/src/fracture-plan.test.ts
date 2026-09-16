@@ -19,6 +19,8 @@ describe('planFracture', () => {
     assert.equal(p.nickOnly, false);
     assert.equal(p.messy, false);
     assert.ok(p.impulse > 0);
+    // Feel polish: modest impulse so chips settle instead of exploding
+    assert.ok(p.impulse < 2.2);
   });
 
   it('too_heavy is messier with more fragments and impulse than sweet', () => {
@@ -28,6 +30,7 @@ describe('planFracture', () => {
     assert.ok(heavy.fragmentCount >= sweet.fragmentCount);
     assert.ok(heavy.impulse > sweet.impulse);
     assert.equal(heavy.messy, true);
+    assert.ok(heavy.impulse < 3.5);
   });
 
   it('weakDevice caps fragment count', () => {

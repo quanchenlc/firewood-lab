@@ -2,6 +2,7 @@ import './style.css';
 import * as THREE from 'three';
 import { DestructibleMesh } from '@dgreenheck/three-pinata';
 import {
+  getSweetSliderRange,
   planFracture,
   resolveChop,
   type Axe,
@@ -17,7 +18,7 @@ import { createLogScene, tintLog } from './log-scene';
 type Phase = 'aim' | 'power' | 'result';
 
 const platform = createH5Platform();
-platform.storage.setItem('firewood.h5.loop', 'assets-pbr-v1');
+platform.storage.setItem('firewood.h5.loop', 'feel-polish-v1');
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
 const flashEl = document.querySelector<HTMLDivElement>('#flash')!;
@@ -32,6 +33,8 @@ const axeMeta = document.querySelector<HTMLParagraphElement>('#axe-meta')!;
 const powerPanel = document.querySelector<HTMLDivElement>('#power-panel')!;
 const slider = document.querySelector<HTMLInputElement>('#slider')!;
 const sliderValue = document.querySelector<HTMLOutputElement>('#slider-value')!;
+const sweetZone = document.querySelector<HTMLDivElement>('#sweet-zone')!;
+const forcePreview = document.querySelector<HTMLParagraphElement>('#force-preview')!;
 const chopBtn = document.querySelector<HTMLButtonElement>('#chop-btn')!;
 const resetAimBtn = document.querySelector<HTMLButtonElement>('#reset-aim-btn')!;
 const againBtn = document.querySelector<HTMLButtonElement>('#again-btn')!;
@@ -42,6 +45,12 @@ const labels: Record<ChopOutcome, string> = {
   too_light: 'too_light · 力道不足',
   sweet: 'sweet · 恰到好处',
   too_heavy: 'too_heavy · 力道过猛',
+};
+
+const previewLabels: Record<ChopOutcome, string> = {
+  too_light: '预计：偏轻',
+  sweet: '预计：合适',
+  too_heavy: '预计：偏重',
 };
 
 const weakDevice = detectWeakDevice();
@@ -68,7 +77,7 @@ function setLoader(ratio: number, label: string): void {
 
 async function boot(): Promise<void> {
 const preloaded = await preloadContentAssets(species, axes, setLoader);
-const logScene = createLogScene(canvas, preloaded.stump);
+const logScene = createLogScene(canvas, preloaded.stump, { weakDevice });
 await logScene.setSpecies(currentSpecies());
 logScene.setAxeVisual(preloaded.axes.get(axeSelect.value) ?? null);
 loaderEl.classList.add('is-done');
@@ -82,6 +91,7 @@ let aimTarget: DestructibleMesh | null = null;
 let aimGeneration = 0;
 let lastOutcome: ChopOutcome | null = null;
 let speciesBusy = false;
+let tabHidden = typeof document !== 'undefined' && document.hidden;
 
 function refreshMeta(): void {
   const sp = currentSpecies();
@@ -93,10 +103,11 @@ function refreshMeta(): void {
     phase === 'aim'
       ? '点木头（或剩余大块）瞄准；拖动画布可绕转。'
       : phase === 'power'
-        ? '调好力道后点「劈下去」。'
+        ? '绿带是合适力道；拖动滑条可看预计结果。'
         : lastOutcome === 'too_light'
           ? '力道太轻，只留下浅痕。加大力道或换斧再试。'
           : '碎片会落下；可点较大碎块继续劈，或「再来一斧」重置。';
+  updateForceUi();
 }
 
 function setPhase(next: Phase): void {
@@ -128,15 +139,52 @@ function slider01(): number {
   return Number(slider.value) / 100;
 }
 
-function updateSliderLabel(): void {
+function updateSweetZone(): void {
+  const { lo, hi } = getSweetSliderRange(currentSpecies(), currentAxe());
+  const left = lo * 100;
+  const width = Math.max(2, (hi - lo) * 100);
+  sweetZone.style.left = `${left}%`;
+  sweetZone.style.width = `${width}%`;
+}
+
+function updateForcePreview(): void {
+  if (phase !== 'power') {
+    forcePreview.textContent = '预计：—';
+    forcePreview.className = 'force-preview is-idle';
+    return;
+  }
+  const outcome = resolveChop({
+    slider01: slider01(),
+    species: currentSpecies(),
+    axe: currentAxe(),
+  });
+  forcePreview.textContent = previewLabels[outcome];
+  forcePreview.className = `force-preview ${outcome}`;
+}
+
+function updateForceUi(): void {
+  updateSweetZone();
+  updateForcePreview();
   sliderValue.textContent = slider01().toFixed(2);
+}
+
+function buzz(outcome: ChopOutcome): void {
+  try {
+    if (!navigator.vibrate) return;
+    if (outcome === 'too_light') navigator.vibrate(18);
+    else if (outcome === 'sweet') navigator.vibrate([12, 40, 18]);
+    else navigator.vibrate([30, 20, 40]);
+  } catch {
+    /* ignore */
+  }
 }
 
 function flash(outcome: ChopOutcome): void {
   flashEl.className = `flash is-on ${outcome}`;
+  const ms = outcome === 'sweet' ? 140 : outcome === 'too_heavy' ? 180 : 100;
   window.setTimeout(() => {
     flashEl.className = 'flash';
-  }, 120);
+  }, ms);
 }
 
 function aimAt(clientX: number, clientY: number): boolean {
@@ -173,9 +221,10 @@ function doChop(): void {
   resultEl.className = `result ${outcome}`;
   tintLog(aimTarget, outcome);
   flash(outcome);
+  buzz(outcome);
   logScene.playAxeSwing(aimPoint);
-  logScene.punchScale(outcome === 'too_heavy' ? 0.18 : 0.1);
-  logScene.setShake(outcome === 'too_heavy' ? 0.22 : outcome === 'too_light' ? 0.06 : 0.14);
+  logScene.punchScale(outcome === 'too_heavy' ? 0.16 : outcome === 'sweet' ? 0.1 : 0.04);
+  logScene.setShake(outcome === 'too_heavy' ? 0.2 : outcome === 'too_light' ? 0.05 : 0.12);
   platform.audio.play(`chop:${outcome}`, { volume: 0.55 });
   platform.storage.setItem('firewood.h5.lastOutcome', outcome);
 
@@ -232,7 +281,7 @@ axeSelect.addEventListener('change', () => {
   refreshMeta();
 });
 
-slider.addEventListener('input', updateSliderLabel);
+slider.addEventListener('input', () => updateForceUi());
 chopBtn.addEventListener('click', () => doChop());
 let chopPressedAt = 0;
 chopBtn.addEventListener('pointerdown', () => {
@@ -294,17 +343,25 @@ platform.input.onPointer((sample) => {
 });
 
 window.addEventListener('resize', () => logScene.resize());
-updateSliderLabel();
+let prev = performance.now();
+document.addEventListener('visibilitychange', () => {
+  tabHidden = document.hidden;
+  if (!tabHidden) prev = performance.now();
+});
+updateForceUi();
 setPhase('aim');
 refreshMeta();
 
-let prev = performance.now();
 function frame(now: number): void {
+  requestAnimationFrame(frame);
+  if (tabHidden) {
+    prev = now;
+    return;
+  }
   const dt = Math.min(0.05, (now - prev) / 1000);
   prev = now;
   logScene.update(dt);
   logScene.renderer.render(logScene.scene, logScene.camera);
-  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 }

@@ -15,7 +15,13 @@ function loadTexture(url: string, colorSpace?: THREE.ColorSpace): Promise<THREE.
       (tex) => {
         if (colorSpace) tex.colorSpace = colorSpace;
         tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-        tex.anisotropy = 4;
+        let aniso = 4;
+        if (typeof navigator !== 'undefined') {
+          const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+          const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+          if (mobile || (typeof mem === 'number' && mem <= 4)) aniso = 2;
+        }
+        tex.anisotropy = aniso;
         resolve(tex);
       },
       undefined,

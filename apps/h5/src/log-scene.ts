@@ -47,9 +47,17 @@ function buildLogGeometry(): THREE.BufferGeometry {
 export function createLogScene(
   canvas: HTMLCanvasElement,
   stumpModel: THREE.Object3D,
+  opts: { weakDevice?: boolean } = {},
 ): LogScene {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  const weak = !!opts.weakDevice;
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: !weak,
+    alpha: true,
+    powerPreference: weak ? 'low-power' : 'high-performance',
+  });
+  const maxDpr = weak ? 1.5 : 2;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
@@ -162,6 +170,7 @@ export function createLogScene(
   function resize(): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
@@ -257,8 +266,13 @@ export function createLogScene(
   }
 
   function update(dt: number): void {
-    fracture.world.step(1 / 60, dt, 4);
+    if (typeof document !== 'undefined' && document.hidden) {
+      applyCamera();
+      return;
+    }
+    fracture.step(dt, weak);
     fracture.sync();
+    if (Math.random() < 0.05) fracture.prune();
 
     if (shake > 0) shake = Math.max(0, shake - dt * 2.8);
     if (punch > 0) {

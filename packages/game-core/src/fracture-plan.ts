@@ -1,3 +1,8 @@
+/**
+ * Pure fracture planning — no DOM / Three / physics.
+ * Maps chop outcome (+ optional axe stats) to fragment budgets & impulse.
+ */
+
 import type { ChopOutcome } from './chop-types.ts';
 
 export interface FractureAxeStats {
@@ -27,14 +32,20 @@ export interface FracturePlan {
   messy: boolean;
 }
 
-const SWEET_BASE = 10;
-const HEAVY_BASE = 16;
-const MAX_FRAGMENTS = 22;
-const WEAK_CAP = 12;
+const SWEET_BASE = 8;
+const HEAVY_BASE = 12;
+const MAX_FRAGMENTS = 16;
+const WEAK_CAP = 10;
 const MIN_RECHOP = 4;
+
+/** Soft cap on simultaneous physics fragments in the scene. */
+export const MAX_LIVE_FRAGMENTS = 28;
+/** Despawn chips smaller than this bbox diagonal. */
+export const TINY_CHIP_DIAGONAL = 0.18;
 
 /**
  * Decide Voronoi fragment budget + impulse from resolveChop outcome.
+ * Impulses kept modest so chips settle on the stump instead of exploding.
  */
 export function planFracture(input: FracturePlanInput): FracturePlan {
   const { outcome, weakDevice = false, axe, generation = 0 } = input;
@@ -57,18 +68,19 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
   base = Math.round(base * (0.85 + 0.25 * weight + 0.1 * edge) * genScale);
 
   let cap = weakDevice ? WEAK_CAP : MAX_FRAGMENTS;
-  if (generation > 0) cap = Math.min(cap, 10);
+  if (generation > 0) cap = Math.min(cap, 8);
 
-  const fragmentCount = clampInt(base, generation > 0 ? MIN_RECHOP : 6, cap);
+  const fragmentCount = clampInt(base, generation > 0 ? MIN_RECHOP : 5, cap);
+  // Woodsy: lateral split impulse, not firework launch
   const impulse =
     outcome === 'too_heavy'
-      ? 2.4 + weight * 1.4
-      : 1.35 + weight * 0.7;
-  const impactRadius = outcome === 'too_heavy' ? 0.42 : 0.28;
+      ? 1.15 + weight * 0.85
+      : 0.72 + weight * 0.45;
+  const impactRadius = outcome === 'too_heavy' ? 0.38 : 0.26;
 
   return {
     fragmentCount,
-    impulse: impulse * (generation > 0 ? 0.75 : 1),
+    impulse: impulse * (generation > 0 ? 0.7 : 1),
     impactRadius,
     nickOnly: false,
     messy: outcome === 'too_heavy',
