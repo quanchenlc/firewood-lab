@@ -50,6 +50,61 @@ body {
   z-index: 2;
 }
 
+.loader {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(ellipse at center, #3a2a1c 0%, #1a1410 70%);
+  transition: opacity 280ms ease, visibility 280ms ease;
+}
+
+.loader.is-done {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.loader-card {
+  width: min(320px, 86vw);
+  text-align: center;
+}
+
+.loader-card h1 {
+  margin: 0 0 8px;
+  font-size: 1.45rem;
+  letter-spacing: 0.02em;
+}
+
+.loader-card p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.loader-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  border: 1px solid rgba(212, 165, 116, 0.25);
+}
+
+.loader-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #9a6235, #d4a574);
+  transition: width 160ms ease;
+}
+
+.loader-credit {
+  margin-top: 14px !important;
+  font-size: 0.72rem !important;
+  opacity: 0.75;
+}
+
+
 .flash.is-on {
   opacity: 0.35;
 }

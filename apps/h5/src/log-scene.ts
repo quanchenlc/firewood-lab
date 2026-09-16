@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { DestructibleMesh } from '@dgreenheck/three-pinata';
-import type { ChopOutcome, FracturePlan } from '@firewood/game-core';
+import type { ChopOutcome, FracturePlan, Species } from '@firewood/game-core';
+import { loadSpeciesMaterials, type SpeciesMaterials } from './assets';
 import { createFractureWorld, type FractureWorld, type PhysFragment } from './fracture-world';
 
 export interface LogScene {
@@ -22,6 +23,9 @@ export interface LogScene {
     generation: number,
   ): PhysFragment[];
   resetLog(): void;
+  setSpecies(species: Species): Promise<void>;
+  setAxeVisual(root: THREE.Object3D | null): void;
+  playAxeSwing(aimPoint: THREE.Vector3): void;
   punchScale(amount?: number): void;
   setShake(intensity: number): void;
   update(dt: number): void;
@@ -30,81 +34,79 @@ export interface LogScene {
   findFragment(mesh: THREE.Object3D): PhysFragment | undefined;
 }
 
-const LOG_COLOR = 0x8b5a2b;
-const INNER_COLOR = 0xd4b896;
-const STUMP_COLOR = 0x5c3d24;
-
+/**
+ * Fracture proxy: low-poly cylinder (Voronoi-friendly).
+ * Visual stump is a separate dense GLB underneath — too heavy to fracture directly (~33k verts).
+ */
 function buildLogGeometry(): THREE.BufferGeometry {
-  // Slightly lower radial segments for mobile Voronoi cost.
-  const geo = new THREE.CylinderGeometry(0.42, 0.45, 1.15, 16, 4);
+  const geo = new THREE.CylinderGeometry(0.38, 0.4, 1.05, 20, 3);
   geo.rotateZ(Math.PI / 2);
   return geo;
 }
 
-export function createLogScene(canvas: HTMLCanvasElement): LogScene {
+export function createLogScene(
+  canvas: HTMLCanvasElement,
+  stumpModel: THREE.Object3D,
+): LogScene {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x1a1410, 7, 16);
+  scene.fog = new THREE.Fog(0x1a1410, 8, 18);
   scene.background = new THREE.Color(0x1a1410);
 
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 50);
-  let yaw = 0.55;
-  let pitch = 0.42;
+  let yaw = 0.7;
+  let pitch = 0.38;
   const lookAt = new THREE.Vector3(0, 0.55, 0);
-  const camRadius = 4.2;
+  const camRadius = 4.4;
 
-  scene.add(new THREE.HemisphereLight(0xfff0dd, 0x3a2a1c, 1.05));
-  const key = new THREE.DirectionalLight(0xffe2c0, 1.15);
-  key.position.set(3.2, 5.2, 2.4);
+  scene.add(new THREE.HemisphereLight(0xfff0dd, 0x2a1e14, 0.85));
+  const key = new THREE.DirectionalLight(0xffe2c0, 1.35);
+  key.position.set(3.4, 5.5, 2.2);
   scene.add(key);
+  const fill = new THREE.DirectionalLight(0xb8c8e0, 0.35);
+  fill.position.set(-3, 2, -2);
+  scene.add(fill);
 
   const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(3.2, 56),
-    new THREE.MeshStandardMaterial({ color: 0x2f241b, roughness: 1 }),
+    new THREE.CircleGeometry(3.4, 56),
+    new THREE.MeshStandardMaterial({ color: 0x2a2118, roughness: 1 }),
   );
   ground.rotation.x = -Math.PI / 2;
   scene.add(ground);
 
-  const stump = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.72, 0.86, 0.45, 20),
-    new THREE.MeshStandardMaterial({ color: STUMP_COLOR, roughness: 0.92 }),
-  );
-  stump.position.y = 0.225;
+  // Real stump GLB (visual only)
+  const stump = stumpModel;
+  stump.position.set(0, 0.26, 0);
   scene.add(stump);
 
-  const stumpTop = new THREE.Mesh(
-    new THREE.CircleGeometry(0.7, 28),
-    new THREE.MeshStandardMaterial({ color: 0xb8956a, roughness: 0.95 }),
-  );
-  stumpTop.rotation.x = -Math.PI / 2;
-  stumpTop.position.y = 0.46;
-  scene.add(stumpTop);
-
-  const outerMat = new THREE.MeshStandardMaterial({ color: LOG_COLOR, roughness: 0.85 });
-  const innerMat = new THREE.MeshStandardMaterial({ color: INNER_COLOR, roughness: 0.9 });
-
-  let logMesh = new DestructibleMesh(buildLogGeometry(), outerMat, innerMat);
-  logMesh.position.set(0, 0.95, 0);
-  logMesh.userData.role = 'log';
-  logMesh.userData.generation = 0;
+  let mats: SpeciesMaterials | null = null;
+  let logMesh = createLogProxy();
   scene.add(logMesh);
 
+  const axeAnchor = new THREE.Group();
+  axeAnchor.position.set(1.15, 0.85, 0.55);
+  scene.add(axeAnchor);
+  let axeSwingT = -1;
+  let axeRestQuat = new THREE.Quaternion();
+
   const marker = new THREE.Mesh(
-    new THREE.SphereGeometry(0.055, 14, 14),
+    new THREE.SphereGeometry(0.05, 14, 14),
     new THREE.MeshStandardMaterial({
       color: 0xffd28a,
       emissive: 0xc47a2c,
-      emissiveIntensity: 0.7,
+      emissiveIntensity: 0.75,
       roughness: 0.4,
     }),
   );
   marker.visible = false;
   scene.add(marker);
   const markerRing = new THREE.Mesh(
-    new THREE.RingGeometry(0.07, 0.11, 20),
+    new THREE.RingGeometry(0.065, 0.1, 20),
     new THREE.MeshBasicMaterial({
       color: 0xffe0a8,
       side: THREE.DoubleSide,
@@ -115,28 +117,38 @@ export function createLogScene(canvas: HTMLCanvasElement): LogScene {
   marker.add(markerRing);
 
   const nickMark = new THREE.Mesh(
-    new THREE.SphereGeometry(0.045, 10, 10),
-    new THREE.MeshStandardMaterial({
-      color: 0x3a2a18,
-      emissive: 0x22180c,
-      emissiveIntensity: 0.35,
-      roughness: 1,
-    }),
+    new THREE.SphereGeometry(0.04, 10, 10),
+    new THREE.MeshStandardMaterial({ color: 0x3a2a18, roughness: 1, transparent: true }),
   );
   nickMark.visible = false;
   scene.add(nickMark);
 
   const fracture = createFractureWorld();
-
   let shake = 0;
   let punch = 0;
   let nickT = -1;
 
+  function createLogProxy(): DestructibleMesh {
+    const outer = mats?.outer ?? [
+      new THREE.MeshStandardMaterial({ color: 0x8b5a2b, roughness: 0.85 }),
+      new THREE.MeshStandardMaterial({ color: 0xd4b896, roughness: 0.9 }),
+      new THREE.MeshStandardMaterial({ color: 0xd4b896, roughness: 0.9 }),
+    ];
+    const inner =
+      mats?.inner ?? new THREE.MeshStandardMaterial({ color: 0xc4a574, roughness: 0.9 });
+    const mesh = new DestructibleMesh(buildLogGeometry(), outer[0]!, inner);
+    mesh.material = outer;
+    mesh.position.set(0, 0.92, 0);
+    mesh.userData.role = 'log';
+    mesh.userData.generation = 0;
+    return mesh;
+  }
+
   function applyCamera(): void {
-    const cp = Math.max(0.18, Math.min(1.2, pitch));
+    const cp = Math.max(0.18, Math.min(1.15, pitch));
     camera.position.set(
       Math.cos(yaw) * Math.cos(cp) * camRadius,
-      Math.sin(cp) * camRadius + 0.35,
+      Math.sin(cp) * camRadius + 0.4,
       Math.sin(yaw) * Math.cos(cp) * camRadius,
     );
     if (shake > 0.001) {
@@ -193,10 +205,7 @@ export function createLogScene(canvas: HTMLCanvasElement): LogScene {
     clearMarker();
     nickMark.visible = false;
     const created = fracture.fractureMesh(target, aimPoint, plan, generation, scene);
-    if (target === logMesh) {
-      // Original log consumed; keep a placeholder reference for reset
-      logMesh.visible = false;
-    }
+    if (target === logMesh) logMesh.visible = false;
     return created;
   }
 
@@ -205,17 +214,34 @@ export function createLogScene(canvas: HTMLCanvasElement): LogScene {
     nickMark.visible = false;
     nickT = -1;
     clearMarker();
-
     if (logMesh.parent) logMesh.removeFromParent();
     fracture.disposeMesh(logMesh);
-
-    const freshOuter = outerMat.clone();
-    const freshInner = innerMat.clone();
-    logMesh = new DestructibleMesh(buildLogGeometry(), freshOuter, freshInner);
-    logMesh.position.set(0, 0.95, 0);
-    logMesh.userData.role = 'log';
-    logMesh.userData.generation = 0;
+    logMesh = createLogProxy();
     scene.add(logMesh);
+  }
+
+  async function setSpecies(species: Species): Promise<void> {
+    const next = await loadSpeciesMaterials(species);
+    mats?.dispose();
+    mats = next;
+    // Refresh proxy materials if still whole
+    if (logMesh.visible && logMesh.parent && logMesh.userData.role === 'log') {
+      logMesh.material = next.outer;
+    }
+  }
+
+  function setAxeVisual(root: THREE.Object3D | null): void {
+    while (axeAnchor.children.length) axeAnchor.remove(axeAnchor.children[0]!);
+    if (!root) return;
+    const clone = root.clone(true);
+    clone.rotation.set(0.2, -0.6, 0.35);
+    axeAnchor.add(clone);
+    axeRestQuat.copy(axeAnchor.quaternion);
+  }
+
+  function playAxeSwing(aimPoint: THREE.Vector3): void {
+    axeAnchor.lookAt(aimPoint);
+    axeSwingT = 0;
   }
 
   function punchScale(amount = 0.12): void {
@@ -245,10 +271,20 @@ export function createLogScene(canvas: HTMLCanvasElement): LogScene {
       nickT += dt;
       const mat = nickMark.material as THREE.MeshStandardMaterial;
       mat.opacity = Math.max(0, 1 - nickT / 2.2);
-      mat.transparent = true;
       if (nickT > 2.2) {
         nickMark.visible = false;
         nickT = -1;
+      }
+    }
+
+    if (axeSwingT >= 0) {
+      axeSwingT += dt;
+      const t = Math.min(1, axeSwingT / 0.28);
+      axeAnchor.rotation.x = -0.9 * Math.sin(t * Math.PI);
+      if (t >= 1) {
+        axeSwingT = -1;
+        axeAnchor.quaternion.copy(axeRestQuat);
+        axeAnchor.rotation.set(0, 0, 0);
       }
     }
 
@@ -258,6 +294,7 @@ export function createLogScene(canvas: HTMLCanvasElement): LogScene {
 
   function dispose(): void {
     fracture.clearFragments();
+    mats?.dispose();
     renderer.dispose();
   }
 
@@ -283,6 +320,9 @@ export function createLogScene(canvas: HTMLCanvasElement): LogScene {
     playNick,
     fractureAt,
     resetLog,
+    setSpecies,
+    setAxeVisual,
+    playAxeSwing,
     punchScale,
     setShake,
     update,
@@ -296,14 +336,10 @@ export function tintLog(mesh: THREE.Mesh, outcome: ChopOutcome): void {
   const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
   for (const raw of mats) {
     const mat = raw as THREE.MeshStandardMaterial;
-    if (!mat?.color) continue;
-    if (outcome === 'sweet') {
-      mat.emissive?.setHex(0x1e3318);
-    } else if (outcome === 'too_light') {
-      mat.emissive?.setHex(0x3a3010);
-    } else {
-      mat.emissive?.setHex(0x3a1810);
-    }
-    if (mat.emissiveIntensity !== undefined) mat.emissiveIntensity = 0.4;
+    if (!mat?.emissive) continue;
+    if (outcome === 'sweet') mat.emissive.setHex(0x1e3318);
+    else if (outcome === 'too_light') mat.emissive.setHex(0x3a3010);
+    else mat.emissive.setHex(0x3a1810);
+    mat.emissiveIntensity = 0.35;
   }
 }

@@ -8,7 +8,8 @@
     "dev": "pnpm --filter @firewood/h5 dev",
     "build": "pnpm --filter @firewood/h5 build",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm -r --if-present test"
+    "test": "pnpm -r --if-present test",
+    "assets:pull": "node scripts/pull-assets.mjs"
   },
   "engines": {
     "node": ">=20"

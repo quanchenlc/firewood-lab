@@ -6,7 +6,14 @@
     "sharpness": 0.75,
     "edge": 0.55,
     "precision": 0.7,
-    "tip": "Light and nimble — great for softwood, easy to under-power hardwood."
+    "tip": "Light and nimble — great for softwood, easy to under-power hardwood.",
+    "model": "/assets/models/axes/hand-axe/hatchet_1k.gltf",
+    "attribution": {
+      "asset": "hatchet",
+      "url": "https://polyhaven.com/a/hatchet",
+      "license": "CC0",
+      "author": "Poly Haven"
+    }
   },
   {
     "id": "nordic-splitting-axe",
@@ -15,7 +22,14 @@
     "sharpness": 0.6,
     "edge": 0.85,
     "precision": 0.55,
-    "tip": "Wide wedge converts force into split; forgiving on knotty rounds."
+    "tip": "Wide wedge converts force into split; forgiving on knotty rounds.",
+    "model": "/assets/models/axes/nordic-splitting-axe/wooden_axe_1k.gltf",
+    "attribution": {
+      "asset": "wooden_axe",
+      "url": "https://polyhaven.com/a/wooden_axe",
+      "license": "CC0",
+      "author": "Poly Haven"
+    }
   },
   {
     "id": "camp-axe",
@@ -24,7 +38,14 @@
     "sharpness": 0.7,
     "edge": 0.6,
     "precision": 0.65,
-    "tip": "Balanced all-rounder — a solid default for learning the power slider."
+    "tip": "Balanced all-rounder — a solid default for learning the power slider.",
+    "model": "/assets/models/axes/camp-axe/wooden_axe_03_1k.gltf",
+    "attribution": {
+      "asset": "wooden_axe_03",
+      "url": "https://polyhaven.com/a/wooden_axe_03",
+      "license": "CC0",
+      "author": "Poly Haven"
+    }
   },
   {
     "id": "maul",
@@ -33,6 +54,14 @@
     "sharpness": 0.4,
     "edge": 0.9,
     "precision": 0.4,
-    "tip": "Heavy maul: overswing risk is high; aim for hardwood sweet spots."
+    "tip": "Heavy maul: overswing risk is high; aim for hardwood sweet spots.",
+    "model": "/assets/models/axes/maul/sledgehammer_01_1k.gltf",
+    "attribution": {
+      "asset": "sledgehammer_01",
+      "url": "https://polyhaven.com/a/sledgehammer_01",
+      "license": "CC0",
+      "author": "Poly Haven",
+      "note": "Sledgehammer stand-in for splitting maul (CC0)."
+    }
   }
 ]

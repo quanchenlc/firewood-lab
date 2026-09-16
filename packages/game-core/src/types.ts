@@ -13,6 +13,14 @@ export interface Species {
   provenance: string;
   /** Learn-while-chopping tip. */
   tip: string;
+  /** Optional H5 material pack paths (public URL). */
+  maps?: {
+    barkDiff: string;
+    barkNor?: string;
+    barkRough?: string;
+    endgrain?: string;
+  };
+  attribution?: Record<string, string>;
 }
 
 /** Axe / maul stats used by chop resolution. */
@@ -28,4 +36,7 @@ export interface Axe {
   /** Aim / sweet-spot forgiveness 0–1 (higher = wider window). */
   precision: number;
   tip: string;
+  /** Optional GLB/GLTF public URL for H5 axe visual. */
+  model?: string;
+  attribution?: Record<string, string>;
 }

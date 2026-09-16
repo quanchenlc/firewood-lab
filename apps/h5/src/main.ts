@@ -10,16 +10,20 @@ import {
 } from '@firewood/game-core';
 import { axes, species } from '@firewood/content';
 import { createH5Platform } from '@firewood/platform';
+import { preloadContentAssets } from './assets';
 import { detectWeakDevice } from './fracture-world';
 import { createLogScene, tintLog } from './log-scene';
 
 type Phase = 'aim' | 'power' | 'result';
 
 const platform = createH5Platform();
-platform.storage.setItem('firewood.h5.loop', 'voronoi-v1');
+platform.storage.setItem('firewood.h5.loop', 'assets-pbr-v1');
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
 const flashEl = document.querySelector<HTMLDivElement>('#flash')!;
+const loaderEl = document.querySelector<HTMLDivElement>('#loader')!;
+const loaderFill = document.querySelector<HTMLDivElement>('#loader-fill')!;
+const loaderLabel = document.querySelector<HTMLParagraphElement>('#loader-label')!;
 const phaseHint = document.querySelector<HTMLParagraphElement>('#phase-hint')!;
 const speciesSelect = document.querySelector<HTMLSelectElement>('#species')!;
 const axeSelect = document.querySelector<HTMLSelectElement>('#axe')!;
@@ -57,7 +61,18 @@ for (const a of axes) {
 speciesSelect.value = 'toona';
 axeSelect.value = 'camp-axe';
 
-const logScene = createLogScene(canvas);
+function setLoader(ratio: number, label: string): void {
+  loaderFill.style.width = `${Math.round(ratio * 100)}%`;
+  loaderLabel.textContent = label;
+}
+
+async function boot(): Promise<void> {
+const preloaded = await preloadContentAssets(species, axes, setLoader);
+const logScene = createLogScene(canvas, preloaded.stump);
+await logScene.setSpecies(currentSpecies());
+logScene.setAxeVisual(preloaded.axes.get(axeSelect.value) ?? null);
+loaderEl.classList.add('is-done');
+
 const raycaster = new THREE.Raycaster();
 const pointerNdc = new THREE.Vector2();
 
@@ -66,25 +81,19 @@ let aimPoint: THREE.Vector3 | null = null;
 let aimTarget: DestructibleMesh | null = null;
 let aimGeneration = 0;
 let lastOutcome: ChopOutcome | null = null;
-
-function currentSpecies(): Species {
-  return species.find((s) => s.id === speciesSelect.value) ?? species[0]!;
-}
-
-function currentAxe(): Axe {
-  return axes.find((a) => a.id === axeSelect.value) ?? axes[0]!;
-}
+let speciesBusy = false;
 
 function refreshMeta(): void {
   const sp = currentSpecies();
   const axe = currentAxe();
-  speciesMeta.textContent = `硬度 ${sp.hardness.toFixed(2)} · ${sp.tip}`;
+  const bark = sp.attribution?.barkAsset ? ` · ${sp.attribution.barkAsset}` : '';
+  speciesMeta.textContent = `硬度 ${sp.hardness.toFixed(2)}${bark} · ${sp.tip}`;
   axeMeta.textContent = `重量 ${axe.weight.toFixed(2)} · 精度 ${axe.precision.toFixed(2)} · ${axe.tip}`;
   tipEl.textContent =
     phase === 'aim'
       ? '点木头（或剩余大块）瞄准；拖动画布可绕转。'
       : phase === 'power'
-        ? '调好力道后点「劈下去」（按住再松手也可）。'
+        ? '调好力道后点「劈下去」。'
         : lastOutcome === 'too_light'
           ? '力道太轻，只留下浅痕。加大力道或换斧再试。'
           : '碎片会落下；可点较大碎块继续劈，或「再来一斧」重置。';
@@ -94,13 +103,11 @@ function setPhase(next: Phase): void {
   phase = next;
   powerPanel.classList.toggle('is-disabled', next !== 'power');
   powerPanel.setAttribute('aria-disabled', String(next !== 'power'));
-  // Keep again visible after first fracture/result so reset is always available
   againBtn.classList.toggle('is-hidden', next === 'aim' && logScene.fracture.fragments.length === 0);
   if (next === 'aim') {
-    phaseHint.textContent =
-      logScene.fracture.fragments.some((f) => f.splittable)
-        ? '点击剩余木块继续劈，或重置'
-        : '点击木头瞄准落点';
+    phaseHint.textContent = logScene.fracture.fragments.some((f) => f.splittable)
+      ? '点击剩余木块继续劈，或重置'
+      : '点击木头瞄准落点';
     if (!lastOutcome) {
       resultEl.textContent = '—';
       resultEl.className = 'result';
@@ -166,6 +173,7 @@ function doChop(): void {
   resultEl.className = `result ${outcome}`;
   tintLog(aimTarget, outcome);
   flash(outcome);
+  logScene.playAxeSwing(aimPoint);
   logScene.punchScale(outcome === 'too_heavy' ? 0.18 : 0.1);
   logScene.setShake(outcome === 'too_heavy' ? 0.22 : outcome === 'too_light' ? 0.06 : 0.14);
   platform.audio.play(`chop:${outcome}`, { volume: 0.55 });
@@ -188,8 +196,6 @@ function doChop(): void {
   aimPoint = null;
   aimTarget = null;
   setPhase('result');
-
-  // After a short beat, allow re-aiming remaining pieces without forcing full reset.
   window.setTimeout(() => {
     if (phase === 'result') setPhase('aim');
   }, 700);
@@ -201,19 +207,32 @@ function resetRound(): void {
   aimGeneration = 0;
   lastOutcome = null;
   logScene.resetLog();
+  void logScene.setSpecies(currentSpecies());
   setPhase('aim');
 }
 
 speciesSelect.addEventListener('change', () => {
+  if (speciesBusy) return;
+  speciesBusy = true;
+  const sp = currentSpecies();
+  platform.storage.setItem('firewood.h5.species', sp.id);
   refreshMeta();
-  platform.storage.setItem('firewood.h5.species', speciesSelect.value);
+  void logScene
+    .setSpecies(sp)
+    .catch((err) => console.error(err))
+    .finally(() => {
+      speciesBusy = false;
+    });
 });
-axeSelect.addEventListener('change', () => {
-  refreshMeta();
-  platform.storage.setItem('firewood.h5.axe', axeSelect.value);
-});
-slider.addEventListener('input', updateSliderLabel);
 
+axeSelect.addEventListener('change', () => {
+  const axe = currentAxe();
+  platform.storage.setItem('firewood.h5.axe', axe.id);
+  logScene.setAxeVisual(preloaded.axes.get(axe.id) ?? null);
+  refreshMeta();
+});
+
+slider.addEventListener('input', updateSliderLabel);
 chopBtn.addEventListener('click', () => doChop());
 let chopPressedAt = 0;
 chopBtn.addEventListener('pointerdown', () => {
@@ -256,19 +275,14 @@ platform.input.onPointer((sample) => {
     orbitPitch = o.pitch;
     return;
   }
-
   if (pointerId !== sample.pointerId) return;
-
   if (sample.phase === 'move') {
     const dx = sample.x - downX;
     const dy = sample.y - downY;
     if (!dragging && Math.hypot(dx, dy) > DRAG_PX) dragging = true;
-    if (dragging) {
-      logScene.setOrbit(orbitYaw - dx * 0.005, orbitPitch + dy * 0.004);
-    }
+    if (dragging) logScene.setOrbit(orbitYaw - dx * 0.005, orbitPitch + dy * 0.004);
     return;
   }
-
   if (sample.phase === 'up' || sample.phase === 'cancel') {
     if (!dragging && sample.phase === 'up' && (phase === 'aim' || phase === 'power')) {
       const rect = canvas.getBoundingClientRect();
@@ -280,7 +294,6 @@ platform.input.onPointer((sample) => {
 });
 
 window.addEventListener('resize', () => logScene.resize());
-
 updateSliderLabel();
 setPhase('aim');
 refreshMeta();
@@ -294,3 +307,17 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+}
+
+function currentSpecies(): Species {
+  return species.find((s) => s.id === speciesSelect.value) ?? species[0]!;
+}
+
+function currentAxe(): Axe {
+  return axes.find((a) => a.id === axeSelect.value) ?? axes[0]!;
+}
+
+void boot().catch((err) => {
+  console.error(err);
+  loaderLabel.textContent = `加载失败：${err instanceof Error ? err.message : String(err)}`;
+});
