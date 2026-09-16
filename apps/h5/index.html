@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#2b2118" />
+    <title>Firewood Lab</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene" aria-label="Firewood Lab"></canvas>
+      <div id="flash" class="flash" aria-hidden="true"></div>
+
+      <div id="loader" class="loader">
+        <div class="loader-card">
+          <h1>Firewood Lab</h1>
+          <p id="loader-label">准备木柴与斧头…</p>
+          <div class="loader-bar"><div id="loader-fill" class="loader-fill"></div></div>
+          <p class="loader-credit">Bark & models · Poly Haven CC0</p>
+        </div>
+      </div>
+
+      <div class="top-bar">
+        <div class="brand-mini">Firewood Lab</div>
+        <p id="phase-hint" class="phase-hint">加载中…</p>
+      </div>
+
+      <div class="hud">
+        <label class="row">
+          <span>树种</span>
+          <select id="species"></select>
+        </label>
+        <p id="species-meta" class="meta"></p>
+
+        <label class="row">
+          <span>斧头</span>
+          <select id="axe"></select>
+        </label>
+        <p id="axe-meta" class="meta"></p>
+
+        <div id="power-panel" class="power-panel is-disabled" aria-disabled="true">
+          <label class="row">
+            <span>力道</span>
+            <div class="slider-wrap">
+              <div id="sweet-zone" class="sweet-zone" aria-hidden="true"></div>
+              <input id="slider" type="range" min="0" max="100" value="50" />
+            </div>
+            <output id="slider-value">0.50</output>
+          </label>
+          <p id="force-preview" class="force-preview">预计：—</p>
+          <div class="actions">
+            <button type="button" id="chop-btn" class="btn primary">劈下去</button>
+            <button type="button" id="reset-aim-btn" class="btn ghost">重瞄</button>
+          </div>
+        </div>
+
+        <p class="result" id="result">—</p>
+        <p class="tip" id="tip">选好树种与斧头，然后点木头瞄准。</p>
+        <button type="button" id="again-btn" class="btn again is-hidden">再来一斧</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

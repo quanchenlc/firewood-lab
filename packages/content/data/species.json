@@ -1,0 +1,134 @@
+[
+  {
+    "id": "pinus",
+    "name": "Pinus",
+    "scientificName": "Pinus spp.",
+    "hardness": 0.32,
+    "ringDensity": 0.4,
+    "provenance": "Northern temperate softwood; resinous and fragrant when split.",
+    "tip": "Softwood needs less force — a light swing often lands in the sweet band.",
+    "maps": {
+      "barkDiff": "assets/bark/pinus/diff.jpg",
+      "barkNor": "assets/bark/pinus/nor.jpg",
+      "barkRough": "assets/bark/pinus/rough.jpg",
+      "endgrain": "assets/endgrain/pinus.png"
+    },
+    "attribution": {
+      "barkAsset": "pine_bark",
+      "barkUrl": "https://polyhaven.com/a/pine_bark",
+      "license": "CC0",
+      "author": "Dimitrios Savva / Poly Haven",
+      "endgrain": "Procedural rings (Firewood Lab), tinted for species"
+    }
+  },
+  {
+    "id": "quercus-serrata",
+    "name": "Quercus serrata",
+    "scientificName": "Quercus serrata",
+    "hardness": 0.72,
+    "ringDensity": 0.7,
+    "provenance": "East Asian oak; dense rings and tough radial rays.",
+    "tip": "Hard oak wants weight and a clean edge — under-swinging glances off.",
+    "maps": {
+      "barkDiff": "assets/bark/quercus-serrata/diff.jpg",
+      "barkNor": "assets/bark/quercus-serrata/nor.jpg",
+      "barkRough": "assets/bark/quercus-serrata/rough.jpg",
+      "endgrain": "assets/endgrain/quercus-serrata.png"
+    },
+    "attribution": {
+      "barkAsset": "jolcham_oak_bark_01",
+      "barkUrl": "https://polyhaven.com/a/jolcham_oak_bark_01",
+      "license": "CC0",
+      "author": "Charlotte Baglioni / Poly Haven",
+      "endgrain": "Procedural rings (Firewood Lab), tinted for species"
+    }
+  },
+  {
+    "id": "cryptomeria",
+    "name": "Cryptomeria japonica",
+    "scientificName": "Cryptomeria japonica",
+    "hardness": 0.38,
+    "ringDensity": 0.45,
+    "provenance": "Japanese cedar (sugi); straight grain, aromatic heartwood.",
+    "tip": "Follow the grain; sugi splits cleanly when force matches its softness.",
+    "maps": {
+      "barkDiff": "assets/bark/cryptomeria/diff.jpg",
+      "barkNor": "assets/bark/cryptomeria/nor.jpg",
+      "barkRough": "assets/bark/cryptomeria/rough.jpg",
+      "endgrain": "assets/endgrain/cryptomeria.png"
+    },
+    "attribution": {
+      "barkAsset": "japanese_cedar_bark",
+      "barkUrl": "https://polyhaven.com/a/japanese_cedar_bark",
+      "license": "CC0",
+      "author": "Charlotte Baglioni / Poly Haven",
+      "endgrain": "Procedural rings (Firewood Lab), tinted for species"
+    }
+  },
+  {
+    "id": "platanus",
+    "name": "Platanus",
+    "scientificName": "Platanus spp.",
+    "hardness": 0.55,
+    "ringDensity": 0.5,
+    "provenance": "Plane / sycamore; interlocking grain can twist the wedge.",
+    "tip": "Interlock fights the axe — precision matters more than raw power.",
+    "maps": {
+      "barkDiff": "assets/bark/platanus/diff.jpg",
+      "barkNor": "assets/bark/platanus/nor.jpg",
+      "barkRough": "assets/bark/platanus/rough.jpg",
+      "endgrain": "assets/endgrain/platanus.png"
+    },
+    "attribution": {
+      "barkAsset": "bark_platanus",
+      "barkUrl": "https://polyhaven.com/a/bark_platanus",
+      "license": "CC0",
+      "author": "Poly Haven",
+      "endgrain": "Procedural rings (Firewood Lab), tinted for species"
+    }
+  },
+  {
+    "id": "eucalyptus-globulus",
+    "name": "Eucalyptus globulus",
+    "scientificName": "Eucalyptus globulus",
+    "hardness": 0.78,
+    "ringDensity": 0.65,
+    "provenance": "Blue gum; dense eucalypt fiber, common plantation timber.",
+    "tip": "Very hard — too light stalls; too heavy wastes energy and jars the handle.",
+    "maps": {
+      "barkDiff": "assets/bark/eucalyptus-globulus/diff.jpg",
+      "barkNor": "assets/bark/eucalyptus-globulus/nor.jpg",
+      "barkRough": "assets/bark/eucalyptus-globulus/rough.jpg",
+      "endgrain": "assets/endgrain/eucalyptus-globulus.png"
+    },
+    "attribution": {
+      "barkAsset": "bark_bluegum",
+      "barkUrl": "https://polyhaven.com/a/bark_bluegum",
+      "license": "CC0",
+      "author": "Dimitrios Savva / Poly Haven",
+      "endgrain": "Procedural rings (Firewood Lab), tinted for species"
+    }
+  },
+  {
+    "id": "toona",
+    "name": "Toona (Chinese cedar)",
+    "scientificName": "Toona sinensis",
+    "hardness": 0.42,
+    "ringDensity": 0.48,
+    "provenance": "Chinese cedar / toon; warm reddish heartwood, medium soft.",
+    "tip": "Medium hardness with a wide sweet zone — good for learning the slider.",
+    "maps": {
+      "barkDiff": "assets/bark/toona/diff.jpg",
+      "barkNor": "assets/bark/toona/nor.jpg",
+      "barkRough": "assets/bark/toona/rough.jpg",
+      "endgrain": "assets/endgrain/toona.png"
+    },
+    "attribution": {
+      "barkAsset": "chinese_cedar_bark",
+      "barkUrl": "https://polyhaven.com/a/chinese_cedar_bark",
+      "license": "CC0",
+      "author": "Poly Haven",
+      "endgrain": "Procedural rings (Firewood Lab), tinted for species"
+    }
+  }
+]

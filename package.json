@@ -1,0 +1,17 @@
+{
+  "name": "firewood-lab",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Firewood Lab — realistic wood-splitting chill game (H5 first, WeChat mini-game later)",
+  "packageManager": "pnpm@10.33.3",
+  "scripts": {
+    "dev": "pnpm --filter @firewood/h5 dev",
+    "build": "pnpm --filter @firewood/h5 build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "assets:pull": "node scripts/pull-assets.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
