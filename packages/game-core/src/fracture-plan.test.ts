@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  BOUNCE_DISTANCE_INCHES,
   BOUNCE_DURATION_MS,
-  BOUNCE_POP_HEIGHT_INCHES,
+  BOUNCE_POP_HEIGHT,
   cleaveNormalXZ,
-  INCH,
+  FACE_GAP_DIAMETER_FRAC,
   isFirewoodChip,
   isRechopWorthy,
+  lateralOffsetFromDiameter,
   planFracture,
 } from './fracture-plan.ts';
 
@@ -22,7 +22,7 @@ describe('planFracture', () => {
     assert.equal(p.popHeight, 0);
   });
 
-  it('sweet is a clean 2-way directional cleave with ~1 inch bounce', () => {
+  it('sweet is a clean 2-way cleave with ~half-diameter face gap frac', () => {
     const p = planFracture({
       outcome: 'sweet',
       axe: { weight: 0.5, edge: 0.6 },
@@ -33,9 +33,9 @@ describe('planFracture', () => {
     assert.equal(p.splitStyle, 'cleave');
     assert.ok(p.impulse > 0);
     assert.ok(p.impulse < 0.35, 'sweet impulse stays a wedged nudge, not a burst');
-    // Reference: distanceInches=1 → ld=0.0254 m per side
-    assert.ok(Math.abs(p.wedgeGap - BOUNCE_DISTANCE_INCHES * INCH) < 1e-9);
-    assert.ok(Math.abs(p.popHeight - BOUNCE_POP_HEIGHT_INCHES * INCH) < 1e-9);
+    // Live reference: face gap ≈ 0.5 × log diameter (wedgeGap stores the fraction).
+    assert.ok(Math.abs(p.wedgeGap - FACE_GAP_DIAMETER_FRAC) < 1e-9);
+    assert.ok(Math.abs(p.popHeight - BOUNCE_POP_HEIGHT) < 1e-9);
     assert.equal(p.bounceMs, BOUNCE_DURATION_MS);
   });
 
@@ -65,6 +65,13 @@ describe('planFracture', () => {
     const g0 = planFracture({ outcome: 'too_heavy', generation: 0 });
     const g1 = planFracture({ outcome: 'too_heavy', generation: 1 });
     assert.ok(g1.fragmentCount <= g0.fragmentCount);
+  });
+});
+
+describe('lateralOffsetFromDiameter', () => {
+  it('splits face-gap frac across both halves', () => {
+    // diameter 0.8, gap 0.5 → each side 0.2
+    assert.ok(Math.abs(lateralOffsetFromDiameter(0.8, 0.5) - 0.2) < 1e-9);
   });
 });
 

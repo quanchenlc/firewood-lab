@@ -2,11 +2,13 @@ import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
 import { DestructibleMesh, FractureOptions, SliceOptions } from '@dgreenheck/three-pinata';
 import {
+  BOUNCE_TILT_DEG,
   BOUNCE_YAW_JITTER_DEG,
   cleaveNormalXZ,
   INCH,
   isFirewoodChip,
   isRechopWorthy,
+  lateralOffsetFromDiameter,
   MAX_LIVE_FRAGMENTS,
   MIN_RECHOP_DIAGONAL,
   TINY_CHIP_DIAGONAL,
@@ -15,8 +17,8 @@ import {
 
 /**
  * Scripted settle bounce — mirrors screen.toys/firewood `performSplit` animator
- * (logic reverse-engineered from minified JS; no assets copied):
- * slide sideways ~1", slight pop + tilt, settle upright on stump (~150ms).
+ * (logic reverse-engineered; no assets copied). Live reference: bipartition with
+ * an obvious lateral 错开 ≈ half the log diameter, pieces stay upright on stump.
  */
 export interface BounceAnim {
   /** Horizontal push direction (impact → piece centroid, y=0). */
@@ -385,18 +387,18 @@ export function createFractureWorld(): FractureWorld {
     }
   }
 
-  /** Soft overlap resolve among stump pieces (reference-ish qC). */
+  /** Soft overlap resolve among settled stump pieces (skip active bounce). */
   function resolveStumpOverlaps(): void {
     const n = fragments.length;
     for (let i = 0; i < n; i++) {
       const a = fragments[i]!;
-      if (!a.onStump) continue;
+      if (!a.onStump || a.bounce) continue;
       const abox = new THREE.Box3().setFromObject(a.mesh);
       const ac = abox.getCenter(new THREE.Vector3());
       const as = abox.getSize(new THREE.Vector3());
       for (let j = i + 1; j < n; j++) {
         const b = fragments[j]!;
-        if (!b.onStump) continue;
+        if (!b.onStump || b.bounce) continue;
         const bbox = new THREE.Box3().setFromObject(b.mesh);
         if (!abox.intersectsBox(bbox)) continue;
         const bc = bbox.getCenter(new THREE.Vector3());
@@ -408,27 +410,18 @@ export function createFractureWorld(): FractureWorld {
           dz = 0;
           len = 1;
         }
-        const overlapX = (as.x + bbox.getSize(new THREE.Vector3()).x) * 0.5 - Math.abs(bc.x - ac.x);
-        const overlapZ = (as.z + bbox.getSize(new THREE.Vector3()).z) * 0.5 - Math.abs(bc.z - ac.z);
-        const push = Math.max(0, Math.min(overlapX, overlapZ)) * 0.5 + 0.002;
+        const bs = bbox.getSize(new THREE.Vector3());
+        const overlapX = (as.x + bs.x) * 0.5 - Math.abs(bc.x - ac.x);
+        const overlapZ = (as.z + bs.z) * 0.5 - Math.abs(bc.z - ac.z);
+        const push = Math.max(0, Math.min(overlapX, overlapZ)) * 0.35 + 0.002;
         const nx = dx / len;
         const nz = dz / len;
-        if (!a.bounce) {
-          a.body.position.x -= nx * push * 0.5;
-          a.body.position.z -= nz * push * 0.5;
-          a.mesh.position.set(a.body.position.x, a.body.position.y, a.body.position.z);
-        } else {
-          a.bounce.baseX -= nx * push * 0.5;
-          a.bounce.baseZ -= nz * push * 0.5;
-        }
-        if (!b.bounce) {
-          b.body.position.x += nx * push * 0.5;
-          b.body.position.z += nz * push * 0.5;
-          b.mesh.position.set(b.body.position.x, b.body.position.y, b.body.position.z);
-        } else {
-          b.bounce.baseX += nx * push * 0.5;
-          b.bounce.baseZ += nz * push * 0.5;
-        }
+        a.body.position.x -= nx * push * 0.5;
+        a.body.position.z -= nz * push * 0.5;
+        a.mesh.position.set(a.body.position.x, a.body.position.y, a.body.position.z);
+        b.body.position.x += nx * push * 0.5;
+        b.body.position.z += nz * push * 0.5;
+        b.mesh.position.set(b.body.position.x, b.body.position.y, b.body.position.z);
       }
     }
   }
@@ -446,15 +439,15 @@ export function createFractureWorld(): FractureWorld {
     }
     const u = Math.min(1, localT / Math.max(1, b.durationMs));
     const ease = smoothstep(u);
-    // Slide sideways to ~1" offset.
+    // Slide sideways — primary motion matching reference upright 错开.
     const x = b.baseX + b.pushX * b.distance * ease;
     const z = b.baseZ + b.pushZ * b.distance * ease;
-    // Slight pop then settle (sin envelope peaks mid-bounce).
+    // Subtle pop then settle (keep tip-free; lateral slide dominates).
     const pop = b.popHeight * Math.sin(Math.PI * u);
     const y = b.baseY + pop;
 
-    // Tilt away from cut mid-bounce, settle upright; small yaw jitter fades in.
-    const tiltRad = b.tiltMult * (10 * Math.PI / 180) * Math.sin(Math.PI * u);
+    // Near-zero tip (reference stays upright); tiny yaw fades in.
+    const tiltRad = b.tiltMult * (BOUNCE_TILT_DEG * Math.PI / 180) * Math.sin(Math.PI * u);
     _tiltAxis.set(-b.pushZ, 0, b.pushX);
     if (_tiltAxis.lengthSq() < 1e-8) _tiltAxis.set(1, 0, 0);
     else _tiltAxis.normalize();
@@ -482,6 +475,18 @@ export function createFractureWorld(): FractureWorld {
     return true;
   }
 
+  /** Pre-split log diameter from the just-sliced leaf union (XZ extent). */
+  function estimateLogDiameter(pieces: DestructibleMesh[]): number {
+    const box = new THREE.Box3();
+    for (const p of pieces) {
+      p.updateMatrixWorld(true);
+      box.expandByObject(p);
+    }
+    const size = box.getSize(new THREE.Vector3());
+    // Cylinder halves still span the original diameter in XZ before bounce.
+    return Math.max(0.2, Math.hypot(size.x, size.z) * 0.92, Math.max(size.x, size.z));
+  }
+
   function registerPieces(
     pieces: DestructibleMesh[],
     worldImpact: THREE.Vector3,
@@ -493,6 +498,9 @@ export function createFractureWorld(): FractureWorld {
     const created: PhysFragment[] = [];
     const now = performance.now();
     const settleMs = plan.bounceMs + 40;
+    const logDiameter = estimateLogDiameter(pieces);
+    // plan.wedgeGap is face-gap fraction of diameter; each half slides half of that.
+    const sideOffset = lateralOffsetFromDiameter(logDiameter, plan.wedgeGap);
 
     nudgeNeighbors(worldImpact, planeNormal);
 
@@ -584,7 +592,7 @@ export function createFractureWorld(): FractureWorld {
               pushZ,
               normalX: planeNormal.x,
               normalZ: planeNormal.z,
-              distance: plan.wedgeGap,
+              distance: sideOffset,
               popHeight: plan.popHeight,
               tiltMult: 1,
               yawRad,
@@ -605,6 +613,8 @@ export function createFractureWorld(): FractureWorld {
       created.push(entry);
     }
 
+    // Overlap resolve only for settled stump pieces — bouncing halves already
+    // get the designed ~half-diameter face gap from lateralOffsetFromDiameter.
     resolveStumpOverlaps();
     return created;
   }

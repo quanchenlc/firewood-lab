@@ -528,10 +528,10 @@ export function createLogScene(
       setAxeOpacity(1);
     } else if (axeSwingT >= 0) {
       axeSwingT += dt;
-      // Raise → strike (vertical handle+bit, straight down) → hold / rebound → hide
-      const tRaise = 0.2;
-      const tHold = axeRebound ? 0.28 : 0.36;
-      const tEnd = axeRebound ? 0.58 : 0.68;
+      // Successful strike: hold briefly at impact then fade — no upward bounce.
+      const tRaise = 0.18;
+      const tHold = axeRebound ? 0.28 : 0.26;
+      const tEnd = axeRebound ? 0.58 : 0.42;
       const raisedPitch = -0.62; // lean back in the vertical swing plane only
       const impactPitch = 0; // fully vertical at impact
       if (axeSwingT < tRaise) {
@@ -560,10 +560,12 @@ export function createLogScene(
         const u = (axeSwingT - tHold) / (tEnd - tHold);
         if (axeRebound) {
           axeAnchor.position.lerpVectors(axeRaisedPos, axeImpactPos, 1 - u);
+          applyAxeSwingPose(impactPitch);
         } else {
-          axeAnchor.position.copy(axeImpactPos);
+          // Slide slightly down/out of frame while fading — no pop back up.
+          axeAnchor.position.copy(axeImpactPos).addScaledVector(_camUp, -0.12 * u);
+          applyAxeSwingPose(impactPitch);
         }
-        applyAxeSwingPose(impactPitch);
         axeFade = 1 - u;
         setAxeOpacity(Math.max(0.05, axeFade));
         axeAnchor.visible = true;

@@ -6,7 +6,9 @@
  * (grain-aligned / planar split) over isotropic Voronoi burst.
  *
  * Settle feel mirrors reverse-engineered screen.toys/firewood `performSplit`
- * bounce (logic only — not assets): ~1 inch lateral / side, ~2 inch pop, ~150ms.
+ * bounce (logic only — not assets). Live reference screenshots show an
+ * obvious lateral 错开 ≈ half the original log diameter (both halves move),
+ * not a hairline 1″ crack.
  */
 
 import type { ChopOutcome } from './chop-types.ts';
@@ -28,16 +30,21 @@ export interface FracturePlanInput {
 /** How the H5 layer should open the wood. */
 export type SplitStyle = 'nick' | 'cleave' | 'cleave_messy';
 
-/** Metres per inch — screen.toys uses `ld = 0.0254`. */
+/** Metres per inch — screen.toys unit scale `ld = 0.0254`. */
 export const INCH = 0.0254;
-/** Lateral offset per stump piece along pushDir (reference `distanceInches=1`). */
-export const BOUNCE_DISTANCE_INCHES = 1;
-/** Peak pop height during settle bounce (reference `popHeightInches=2`). */
-export const BOUNCE_POP_HEIGHT_INCHES = 2;
-/** Scripted bounce duration in ms (reference ~150ms animator). */
-export const BOUNCE_DURATION_MS = 150;
-/** Random yaw jitter applied to each stump half (±degrees). */
-export const BOUNCE_YAW_JITTER_DEG = 2;
+/**
+ * Target face-to-face gap as a fraction of the pre-split log diameter.
+ * Live screen.toys first-chop reads ≈ 0.5× diameter (both halves slide out).
+ */
+export const FACE_GAP_DIAMETER_FRAC = 0.5;
+/** Peak pop height during settle (metres) — keep subtle; main motion is lateral. */
+export const BOUNCE_POP_HEIGHT = 0.04;
+/** Scripted slide duration in ms. */
+export const BOUNCE_DURATION_MS = 160;
+/** Random yaw jitter applied to each stump half (±degrees) — tiny, stay upright. */
+export const BOUNCE_YAW_JITTER_DEG = 1.5;
+/** Mid-bounce tilt (degrees) — reference stays upright; keep near-zero tip. */
+export const BOUNCE_TILT_DEG = 2;
 
 export interface FracturePlan {
   /** 0 = do not fracture (too_light). Target piece budget for cleave recursion. */
@@ -45,11 +52,11 @@ export interface FracturePlan {
   /** Lateral split impulse along the cleave-plane normal (not radial burst). */
   impulse: number;
   /**
-   * World-space lateral offset along pushDir / cleave normal (metres).
-   * Reference: `1 * ld` with `ld = 0.0254` (≈ 1 inch) per side.
+   * Face-to-face gap as a fraction of log diameter (H5 multiplies by measured diameter).
+   * Each half slides about half of this along pushDir.
    */
   wedgeGap: number;
-  /** Bounce pop height in metres (reference ≈ 2 inches). */
+  /** Bounce pop height in metres. */
   popHeight: number;
   /** Scripted bounce duration (ms). */
   bounceMs: number;
@@ -136,20 +143,17 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
   const impulse =
     outcome === 'too_heavy' ? 0.06 + weight * 0.04 : 0.04 + weight * 0.02;
 
-  // Reference performSplit: distanceInches=1, popHeightInches=2 (heavy opens a hair more).
-  const distanceInches =
-    outcome === 'too_heavy' ? BOUNCE_DISTANCE_INCHES * (1.15 + weight * 0.1) : BOUNCE_DISTANCE_INCHES;
-  const popInches =
-    outcome === 'too_heavy'
-      ? BOUNCE_POP_HEIGHT_INCHES * 1.1
-      : BOUNCE_POP_HEIGHT_INCHES;
-  const genGap = generation > 0 ? 0.7 : 1;
+  // Face gap ≈ half a diameter on first chop; later chops open a bit less.
+  const gapFrac =
+    FACE_GAP_DIAMETER_FRAC *
+    (outcome === 'too_heavy' ? 1.08 : 1) *
+    (generation > 0 ? 0.75 : 1);
 
   return {
     fragmentCount,
     impulse: impulse * (generation > 0 ? 0.65 : 1),
-    wedgeGap: distanceInches * INCH * genGap,
-    popHeight: popInches * INCH * genGap,
+    wedgeGap: gapFrac,
+    popHeight: BOUNCE_POP_HEIGHT * (generation > 0 ? 0.7 : 1),
     bounceMs: BOUNCE_DURATION_MS,
     impactRadius: outcome === 'too_heavy' ? 0.24 : 0.18,
     nickOnly: false,
@@ -181,6 +185,15 @@ export function isFirewoodChip(sizeX: number, sizeY: number, sizeZ: number): boo
   if (aspect < 0.32 || aspect > 3.6) return true;
   if (horiz < 0.14) return true;
   return false;
+}
+
+/**
+ * Per-side slide distance so both halves create `gapFrac * diameter` face gap.
+ */
+export function lateralOffsetFromDiameter(diameter: number, gapFrac: number): number {
+  const d = Math.max(0.05, diameter);
+  const frac = Math.max(0, gapFrac);
+  return (frac * d) / 2;
 }
 
 function clampInt(n: number, lo: number, hi: number): number {

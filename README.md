@@ -24,7 +24,7 @@ pnpm --filter @firewood/h5 dev
 - 力道条绿带由硬度 × 斧头属性决定；指针自动往返（「转转转」），第二次点击瞬间取样
 - 第二次点击**总会**播放斧头自上而下挥砍（即使指针不在绿带）
 - `too_light`：斧头回弹，木桩几何不变（仅浅痕）
-- `sweet`：沿瞄准点竖向劈面剖成**两半**，各侧向错开约 **1 inch**，带短暂 pop/tilt 后直立停在桩上（对齐 screen.toys `performSplit` bounce，非刚体爆裂）
+- `sweet`：沿瞄准点竖向劈面剖成**两半**，侧向错开约 **半个原木直径**（对齐 screen.toys 实拍），直立停在桩上（scripted slide，非刚体爆裂）
 - `too_heavy`：仍是定向劈面，缝略宽或带次要碎口；过小/畸碎片才物理甩到柴堆
 - 可点击较大碎块继续劈，或点右下角重置
 
@@ -70,8 +70,8 @@ scripts/pull-assets.mjs  # 从 Poly Haven API 拉取 1K 贴图与 GLTF
 | 主路径 | `DestructibleMesh.sliceWorld` — 过瞄准点的竖向劈面（grain / up） |
 | 过猛 | 同劈面递归二次剖分，碎块仍沿 ±法向侧向冲量 |
 | 回退 | 2.5D Voronoi（沿 Y 挤出）+ 劈面两侧种子点 |
-| 物理 | `cannon-es`（AABB）+ **scripted bounce**（~1″ 侧移 / ~2″ pop / ~150ms tilt→直立；主半块 STATIC） |
-| 预算 | `planFracture()` → `splitStyle: cleave \| cleave_messy \| nick` + `wedgeGap`（=1×0.0254m）+ `popHeight` |
+| 物理 | `cannon-es`（AABB）+ **scripted slide**（面缝 ≈0.5×直径 / 侧；主半块 STATIC 直立） |
+| 预算 | `planFracture()` → `splitStyle` + `wedgeGap`（面缝/直径分数）+ `popHeight` |
 
 ## 平台路线
 
