@@ -42,19 +42,26 @@
         <p id="axe-meta" class="meta"></p>
 
         <div id="power-panel" class="power-panel is-disabled" aria-disabled="true">
-          <label class="row">
+          <div class="row rhythm-row">
             <span>力道</span>
-            <div class="slider-wrap">
+            <div
+              id="rhythm-bar"
+              class="rhythm-bar"
+              role="img"
+              aria-label="力道节奏条：指针自动往返，按下定格"
+            >
+              <div class="rhythm-track" aria-hidden="true"></div>
               <div id="sweet-zone" class="sweet-zone" aria-hidden="true"></div>
-              <input id="slider" type="range" min="0" max="100" value="50" />
+              <div id="rhythm-knob" class="rhythm-knob" aria-hidden="true"></div>
             </div>
             <output id="slider-value">0.50</output>
-          </label>
+          </div>
           <p id="force-preview" class="force-preview">预计：—</p>
           <div class="actions">
-            <button type="button" id="chop-btn" class="btn primary">劈下去</button>
+            <button type="button" id="chop-btn" class="btn primary">定格劈下</button>
             <button type="button" id="reset-aim-btn" class="btn ghost">重瞄</button>
           </div>
+          <p class="rhythm-hint">指针自动往返；在绿带时按下定格（按下瞬间取样）</p>
         </div>
 
         <p class="result" id="result">—</p>
