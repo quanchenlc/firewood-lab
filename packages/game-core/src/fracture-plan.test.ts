@@ -23,7 +23,7 @@ describe('planFracture', () => {
     assert.equal(p.splitStyle, 'cleave');
     assert.ok(p.impulse > 0);
     assert.ok(p.impulse < 0.35, 'sweet impulse stays a wedged nudge, not a burst');
-    assert.ok(p.wedgeGap > 0.02 && p.wedgeGap < 0.1);
+    assert.ok(p.wedgeGap > 0.015 && p.wedgeGap < 0.06);
   });
 
   it('too_heavy is messier with more fragments than sweet, still cleave', () => {

@@ -114,6 +114,8 @@ export function createFractureWorld(): FractureWorld {
   const FIXED = 1 / 60;
   const up = new THREE.Vector3(0, 1, 0);
   const sliceOpts = new SliceOptions();
+  /** World Y of the chopping-block top — wedged pieces snap here so they don't hover. */
+  const STUMP_SUPPORT_Y = 0.52;
 
   function bboxDiagonal(mesh: THREE.Mesh): number {
     const box = new THREE.Box3().setFromObject(mesh);
@@ -339,22 +341,30 @@ export function createFractureWorld(): FractureWorld {
       let side = Math.sign(offset.dot(planeNormal));
       if (side === 0) side = i % 2 === 0 ? 1 : -1;
 
+      // Keep upright — tiny tip only (readable crack, no tumble / hover).
+      const tip = plan.messy ? 0.02 : 0.01;
+      body.quaternion.setFromEuler(planeNormal.z * side * tip, 0, -planeNormal.x * side * tip);
+      fragment.quaternion.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w);
+
+      // Snap bottoms onto the stump top so halves sit on the block.
+      fragment.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(fragment);
+      const settleY = STUMP_SUPPORT_Y - box.min.y;
+      body.position.y += settleY;
+      fragment.position.y = body.position.y;
+
       const baseX = body.position.x;
       const baseY = body.position.y;
       const baseZ = body.position.z;
 
       // Target crack width — messy gets a bit wider / secondary nick offset.
-      let toGap = plan.wedgeGap * (plan.messy ? 1.35 + (i > 1 ? 0.45 : 0) : 1);
-      // Tiny pitch so the crack reads in perspective without tumbling off.
-      const tip = plan.messy ? 0.035 : 0.018;
-      body.quaternion.setFromEuler(planeNormal.z * side * tip, 0, -planeNormal.x * side * tip);
-      fragment.quaternion.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w);
+      const toGap = plan.wedgeGap * (plan.messy ? 1.25 + (i > 1 ? 0.35 : 0) : 1);
 
-      // Start closed; animate open so it feels like a settle, not a teleport.
-      const fromGap = Math.min(0.006, toGap * 0.15);
+      // Start nearly closed; animate open so it feels like a settle, not a teleport.
+      const fromGap = Math.min(0.004, toGap * 0.12);
       body.position.set(
         baseX + planeNormal.x * side * fromGap,
-        baseY + (plan.messy ? 0.004 : 0.002),
+        baseY,
         baseZ + planeNormal.z * side * fromGap,
       );
       fragment.position.set(body.position.x, body.position.y, body.position.z);
@@ -380,9 +390,9 @@ export function createFractureWorld(): FractureWorld {
           fromGap,
           toGap,
           startAt: now,
-          durationMs: plan.messy ? 220 : 180,
+          durationMs: plan.messy ? 200 : 160,
           baseX,
-          baseY: baseY + (plan.messy ? 0.004 : 0.002),
+          baseY,
           baseZ,
         },
       };

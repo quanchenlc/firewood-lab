@@ -111,6 +111,19 @@ async function boot(): Promise<void> {
   let rhythm01 = 0.5;
   let rhythmPhase = 0;
   let chopping = false;
+  let impactTimer: number | null = null;
+  let phaseTimer: number | null = null;
+
+  function clearChopTimers(): void {
+    if (impactTimer !== null) {
+      window.clearTimeout(impactTimer);
+      impactTimer = null;
+    }
+    if (phaseTimer !== null) {
+      window.clearTimeout(phaseTimer);
+      phaseTimer = null;
+    }
+  }
 
   function refreshChipLabels(): void {
     speciesChipLabel.textContent = currentSpecies().name;
@@ -265,11 +278,15 @@ async function boot(): Promise<void> {
     });
 
     // Resolve crack / nick at blade impact so the stump stays unchanged on rebound.
-    window.setTimeout(() => {
+    impactTimer = window.setTimeout(() => {
+      impactTimer = null;
       if (plan.nickOnly) {
         logScene.playNick(point);
         logScene.clearMarker();
+      } else if (target.parent || target.visible) {
+        logScene.fractureAt(target, point, plan, generation);
       } else {
+        // Target already removed (rare race) — still try fracture by world log mesh.
         logScene.fractureAt(target, point, plan, generation);
       }
     }, IMPACT_DELAY_MS);
@@ -277,13 +294,16 @@ async function boot(): Promise<void> {
     aimPoint = null;
     aimTarget = null;
     setPhase('result');
-    window.setTimeout(() => {
+    phaseTimer = window.setTimeout(() => {
+      phaseTimer = null;
       chopping = false;
       if (phase === 'result') setPhase('aim');
     }, 720);
   }
 
   function resetRound(): void {
+    clearChopTimers();
+    chopping = false;
     aimPoint = null;
     aimTarget = null;
     aimGeneration = 0;
