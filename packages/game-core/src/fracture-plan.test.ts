@@ -93,6 +93,22 @@ describe('cleaveNormalFromCameraFacing', () => {
     const [nx, nz] = cleaveNormalFromCameraFacing(0, 0);
     assert.ok(Math.abs(Math.hypot(nx, nz) - 1) < 1e-9);
   });
+
+  it('orbit facing change must not reuse a stale locked normal', () => {
+    // Simulate: first chop used facing +Z; user then orbits to look +X.
+    const locked = cleaveNormalFromCameraFacing(0, 1);
+    const liveAfterOrbit = cleaveNormalFromCameraFacing(1, 0);
+    const same =
+      Math.abs(locked[0] - liveAfterOrbit[0]) < 1e-9 &&
+      Math.abs(locked[1] - liveAfterOrbit[1]) < 1e-9;
+    assert.equal(
+      same,
+      false,
+      'live camera facing after orbit must recompute a different cleave normal',
+    );
+    // Dot ≈ 0 → perpendicular families (vertical cut vs horizontal cut on screen).
+    assert.ok(Math.abs(locked[0] * liveAfterOrbit[0] + locked[1] * liveAfterOrbit[1]) < 1e-9);
+  });
 });
 
 describe('rotateCleaveNormal90 / advanceOrientChopCount', () => {
