@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import type { Axe, Species } from '@firewood/game-core';
 import { assetUrl } from './asset-url';
+import { STUMP_BOT_RADIUS, STUMP_HEIGHT, STUMP_TOP_RADIUS } from './log-dimensions';
 
 export type ProgressFn = (ratio: number, label: string) => void;
 
@@ -227,9 +228,10 @@ export async function buildChoppingBlock(
     metalness: 0,
   });
 
-  const TOP_R = 0.5;
-  const BOT_R = 0.56;
-  const HEIGHT = 0.52;
+  // Matched to the smaller choppable round in `log-dimensions.ts`.
+  const TOP_R = STUMP_TOP_RADIUS;
+  const BOT_R = STUMP_BOT_RADIUS;
+  const HEIGHT = STUMP_HEIGHT;
 
   const root = new THREE.Group();
   root.name = 'chopping-block';

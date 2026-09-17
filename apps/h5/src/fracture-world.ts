@@ -188,7 +188,7 @@ export function createFractureWorld(
   // keep scale near 1 so face-grain doesn't micro-tile into a moiré.
   sliceOpts.textureScale.set(1, 1);
   /** World Y of the chopping-block top — measured from the visual stump mesh. */
-  let stumpSupportY = opts?.stumpSupportY ?? 0.56;
+  let stumpSupportY = opts?.stumpSupportY ?? 0.42;
 
   function fitStumpCollider(next: { topY: number; height: number; radius: number }): void {
     const height = Math.max(0.28, next.height);
@@ -215,8 +215,8 @@ export function createFractureWorld(
 
   fitStumpCollider({
     topY: stumpSupportY,
-    height: opts?.stumpHeight ?? 0.56,
-    radius: opts?.stumpRadius ?? 0.48,
+    height: opts?.stumpHeight ?? 0.42,
+    radius: opts?.stumpRadius ?? 0.32,
   });
 
   const _tiltQ = new THREE.Quaternion();
