@@ -21,7 +21,7 @@ export const STUMP_HEIGHT = 0.42;
 /** Orbit look-at Y ≈ stump top + half log height (log visual center). */
 export const CAM_LOOK_AT_Y = STUMP_HEIGHT + LOG_HEIGHT * 0.5;
 /** Closer orbit so the smaller round still fills first-person framing. */
-export const CAM_RADIUS = 3.35;
+export const CAM_RADIUS = 2.95;
 
 /** Approximate full-log AABB width (uses bottom radius — widest). */
 export function logAabbSize(): { x: number; y: number; z: number } {

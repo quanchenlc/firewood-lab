@@ -39,6 +39,6 @@ describe('log-dimensions (firewood-scale round)', () => {
     assert.ok(LOG_RADIUS_TOP <= LOG_RADIUS_BOT);
     assert.ok(LOG_HEIGHT > 0.25 && LOG_HEIGHT < 0.5);
     assert.equal(CAM_LOOK_AT_Y, STUMP_HEIGHT + LOG_HEIGHT * 0.5);
-    assert.ok(CAM_RADIUS > 2.5 && CAM_RADIUS < 4.0);
+    assert.ok(CAM_RADIUS > 2.4 && CAM_RADIUS < 3.6);
   });
 });
