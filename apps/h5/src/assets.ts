@@ -88,9 +88,8 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
     endMap.repeat.set(1, 1);
   }
   if (faceMap) {
-    faceMap.wrapS = faceMap.wrapT = THREE.RepeatWrapping;
-    // Mild tiling along height so vertical grain doesn't look stretched.
-    faceMap.repeat.set(1.1, 1.6);
+    faceMap.wrapS = faceMap.wrapT = THREE.ClampToEdgeWrapping;
+    faceMap.repeat.set(0.85, 1.15);
   }
 
   const bark = new THREE.MeshStandardMaterial({
@@ -108,10 +107,10 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
     metalness: 0,
   });
 
-  // Cut faces get longitudinal grain + DoubleSide (covers flipped normals / thin shells).
+  // Cut faces: longitudinal grain + DoubleSide (not end-grain rings).
   const inner = new THREE.MeshStandardMaterial({
     map: faceMap ?? undefined,
-    color: faceMap ? 0xffffff : 0xc4a574,
+    color: faceMap ? 0xf0e0d0 : 0xc4a574,
     roughness: 0.88,
     metalness: 0,
     side: THREE.DoubleSide,

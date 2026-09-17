@@ -155,9 +155,20 @@ export function createLogScene(
   stump.position.set(0, 0.26, 0);
   scene.add(stump);
   stump.updateMatrixWorld(true);
-  // Sit the round on the measured stump crown (not a guessed constant — that caused hover).
+  // Sit the round on the measured stump crown. Prefer a center ray hit so we
+  // land on the flat chopping face (bbox.max can be a high bark nub).
   const stumpBox = new THREE.Box3().setFromObject(stump);
-  const stumpTopY = stumpBox.max.y - 0.01;
+  let stumpTopY = stumpBox.max.y - 0.02;
+  {
+    const ray = new THREE.Raycaster(
+      new THREE.Vector3(0, stumpBox.max.y + 1.5, 0),
+      new THREE.Vector3(0, -1, 0),
+    );
+    const hits = ray.intersectObject(stump, true);
+    if (hits[0]) {
+      stumpTopY = hits[0].point.y + 0.005;
+    }
+  }
   const logCenterY = stumpTopY + LOG_HEIGHT * 0.5 + 0.01;
 
   let mats: SpeciesMaterials | null = null;
