@@ -198,18 +198,25 @@ export function createFractureWorld(
   let stumpSupportY = opts?.stumpSupportY ?? 0.42;
 
   /**
-   * Firewood toss feel — chips must clear the stump top and settle on the
-   * surrounding yard ground (reference screen.toys/firewood), not rest on the block.
-   * Start just past the stump collider, then a moderate outward arc into the yard ring.
+   * Firewood toss feel — soft tip / short-arc drop beside the stump
+   * (reference screen.toys/firewood), not a snappy “pop” across the yard.
+   *
+   * Before (#16 escape-top): HX 2.05–2.90, VY 2.05–2.75, CLEAR_R 0.48 → radial≈1.6–2.3
+   * After (soft drop):       HX 0.65–0.95, VY 0.55–0.85, CLEAR_R 0.42 → near-rim / inner yard
+   * Still starts just past the stump collider so chips don’t park on the top.
    */
   const FIREWOOD_TOSS_SETTLE_MS = 1600;
-  const FIREWOOD_TOSS_LIFT = 0.14;
-  /** Radial clear past stump top before applying impulse (visual R≈0.32, collider ≥0.35). */
-  const FIREWOOD_TOSS_CLEAR_R = 0.48;
-  const FIREWOOD_TOSS_HX = 2.05;
-  const FIREWOOD_TOSS_HX_JIT = 0.85;
-  const FIREWOOD_TOSS_VY = 2.05;
-  const FIREWOOD_TOSS_VY_JIT = 0.7;
+  /** Slight lift so the chip isn’t jammed into the stump-top box. */
+  const FIREWOOD_TOSS_LIFT = 0.06;
+  /** Radial clear past stump top before impulse (visual R≈0.32, collider ≥0.35). */
+  const FIREWOOD_TOSS_CLEAR_R = 0.42;
+  const FIREWOOD_TOSS_HX = 0.65;
+  const FIREWOOD_TOSS_HX_JIT = 0.3;
+  const FIREWOOD_TOSS_VY = 0.55;
+  const FIREWOOD_TOSS_VY_JIT = 0.3;
+  /** Tip/roll rate (rad/s) — outward tip, not random cannon spin. */
+  const FIREWOOD_TOSS_TIP = 1.15;
+  const FIREWOOD_TOSS_TIP_JIT = 0.85;
 
   function fitStumpCollider(next: { topY: number; height: number; radius: number }): void {
     const height = Math.max(0.28, next.height);
@@ -940,7 +947,7 @@ export function createFractureWorld(
       };
 
       if (!onStump) {
-        // Classified firewood: clear stump top + outward fling onto yard ground.
+        // Classified firewood: clear stump top + soft tip/drop beside the block.
         applyFirewoodTossImpulse(entry, planeNormal, { x: pushX, z: pushZ });
       }
 
@@ -1148,7 +1155,7 @@ export function createFractureWorld(
     return { ox, oz };
   }
 
-  /** Apply outward firewood-chip impulse (post-split + option-A tossAsFirewood). */
+  /** Soft tip / short-arc drop beside the stump (post-split + option-A tossAsFirewood). */
   function applyFirewoodTossImpulse(
     f: PhysFragment,
     planeNormal?: THREE.Vector3,
@@ -1167,14 +1174,16 @@ export function createFractureWorld(
     const hx = FIREWOOD_TOSS_HX + Math.random() * FIREWOOD_TOSS_HX_JIT;
     const vy = FIREWOOD_TOSS_VY + Math.random() * FIREWOOD_TOSS_VY_JIT;
     f.body.velocity.set(
-      ox * hx + (Math.random() - 0.5) * 0.45,
+      ox * hx + (Math.random() - 0.5) * 0.18,
       vy,
-      oz * hx + (Math.random() - 0.5) * 0.45,
+      oz * hx + (Math.random() - 0.5) * 0.18,
     );
+    // Tip outward (ω ≈ tip * up×outward) — gentle roll-off, not a spin burst.
+    const tip = FIREWOOD_TOSS_TIP + Math.random() * FIREWOOD_TOSS_TIP_JIT;
     f.body.angularVelocity.set(
-      (Math.random() - 0.5) * 5,
-      (Math.random() - 0.5) * 4,
-      (Math.random() - 0.5) * 5,
+      -oz * tip + (Math.random() - 0.5) * 0.5,
+      (Math.random() - 0.5) * 0.7,
+      ox * tip + (Math.random() - 0.5) * 0.5,
     );
     f.body.wakeUp();
   }
@@ -1238,18 +1247,19 @@ export function createFractureWorld(
       f.splittable = false;
       f.settleUntil = now + FIREWOOD_TOSS_SETTLE_MS;
       ensureDynamicBody(f);
-      // Round-end: same clear-stump path, slightly hotter horizontal than chip toss.
+      // Round-end: same soft clear + short drop, slightly wider than chip toss.
       const { ox, oz } = clearStumpForToss(f);
-      const hx = 2.4 + Math.random() * 1.0;
+      const hx = 0.95 + Math.random() * 0.45;
+      const tip = FIREWOOD_TOSS_TIP + Math.random() * FIREWOOD_TOSS_TIP_JIT;
       f.body.velocity.set(
-        ox * hx + (Math.random() - 0.5) * 0.5,
+        ox * hx + (Math.random() - 0.5) * 0.22,
         FIREWOOD_TOSS_VY + Math.random() * FIREWOOD_TOSS_VY_JIT,
-        oz * hx + (Math.random() - 0.5) * 0.5,
+        oz * hx + (Math.random() - 0.5) * 0.22,
       );
       f.body.angularVelocity.set(
-        (Math.random() - 0.5) * 5,
-        (Math.random() - 0.5) * 4,
-        (Math.random() - 0.5) * 5,
+        -oz * tip + (Math.random() - 0.5) * 0.5,
+        (Math.random() - 0.5) * 0.7,
+        ox * tip + (Math.random() - 0.5) * 0.5,
       );
       f.body.wakeUp();
     }
