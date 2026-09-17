@@ -13,6 +13,11 @@ import {
   isTooThinToSplit,
   MAX_LIVE_FRAGMENTS,
   MIN_RECHOP_DIAGONAL,
+  planRingPileSlots,
+  RING_PILE_RADIUS,
+  RING_PILE_RECYCLE_JIT_MS,
+  RING_PILE_RECYCLE_MS,
+  RING_PILE_STAGGER_MS,
   sampleTipDropPose,
   thicknessInchesAlong,
   tipDropRestPose,
@@ -94,7 +99,7 @@ export interface PhysFragment {
   bounce?: BounceAnim;
   /** Scripted tip/slide onto yard ground (classified firewood). */
   tipDrop?: TipDropAnim;
-  /** Scripted slide into the side circle pile after round completion. */
+  /** Scripted slide into the annular ring pile after round completion. */
   recycle?: {
     startAt: number;
     durationMs: number;
@@ -104,6 +109,14 @@ export interface PhysFragment {
     toX: number;
     toY: number;
     toZ: number;
+    fromQx: number;
+    fromQy: number;
+    fromQz: number;
+    fromQw: number;
+    toQx: number;
+    toQy: number;
+    toQz: number;
+    toQw: number;
   };
 }
 
@@ -130,7 +143,7 @@ export interface FractureWorld {
   prune(): void;
   /** Knock stump pieces off via scripted tip-drop (round complete). */
   scatterToGround(): void;
-  /** After scatter, slide pieces into a ring pile around the scene. */
+  /** After scatter, slide pieces into a neat annular pile around the stump. */
   recycleToRing(opts?: { radius?: number; groundY?: number }): void;
   /** True while any fragment is still recycling into the ring. */
   isRecycling(): boolean;
@@ -272,7 +285,13 @@ export function createFractureWorld(
   const _tiltQ = new THREE.Quaternion();
   const _yawQ = new THREE.Quaternion();
   const _outQ = new THREE.Quaternion();
+  const _fromQ = new THREE.Quaternion();
+  const _toQ = new THREE.Quaternion();
   const _tiltAxis = new THREE.Vector3();
+  const _basis = new THREE.Matrix4();
+  const _axisX = new THREE.Vector3();
+  const _axisY = new THREE.Vector3();
+  const _axisZ = new THREE.Vector3();
 
   function bboxDiagonal(mesh: THREE.Mesh): number {
     const box = new THREE.Box3().setFromObject(mesh);
@@ -1120,13 +1139,20 @@ export function createFractureWorld(
         const u = Math.min(1, localT / Math.max(1, r.durationMs));
         const ease = u * u * (3 - 2 * u);
         const x = r.fromX + (r.toX - r.fromX) * ease;
-        const y = r.fromY + (r.toY - r.fromY) * ease + Math.sin(Math.PI * u) * 0.35;
+        const y = r.fromY + (r.toY - r.fromY) * ease + Math.sin(Math.PI * u) * 0.28;
         const z = r.fromZ + (r.toZ - r.fromZ) * ease;
+        _fromQ.set(r.fromQx, r.fromQy, r.fromQz, r.fromQw);
+        _toQ.set(r.toQx, r.toQy, r.toQz, r.toQw);
+        _outQ.copy(_fromQ).slerp(_toQ, ease);
         f.body.position.set(x, y, z);
         f.mesh.position.set(x, y, z);
+        f.mesh.quaternion.copy(_outQ);
+        f.body.quaternion.set(_outQ.x, _outQ.y, _outQ.z, _outQ.w);
         if (u >= 1) {
           f.body.position.set(r.toX, r.toY, r.toZ);
           f.mesh.position.set(r.toX, r.toY, r.toZ);
+          f.mesh.quaternion.copy(_toQ);
+          f.body.quaternion.set(_toQ.x, _toQ.y, _toQ.z, _toQ.w);
           f.recycle = undefined;
           f.body.sleep();
         }
@@ -1325,14 +1351,32 @@ export function createFractureWorld(
     }
   }
 
-  /** Slide every live fragment into a big ring pile around the chopping block. */
+  /** Slide every live fragment into a neat annular pile around the chopping block. */
   function recycleToRing(opts?: { radius?: number; groundY?: number }): void {
-    const radius = opts?.radius ?? 2.35;
-    const groundY = opts?.groundY ?? 0.08;
+    const radius = opts?.radius ?? RING_PILE_RADIUS;
+    const groundY = opts?.groundY ?? 0;
     const now = performance.now();
-    const n = Math.max(1, fragments.length);
-    for (let i = 0; i < fragments.length; i++) {
-      const f = fragments[i]!;
+    const live = fragments.filter((f) => f.mesh.visible);
+    const n = live.length;
+    if (n === 0) return;
+
+    const halfHeights: number[] = [];
+    const rnds: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const f = live[i]!;
+      halfHeights.push(tipRestHalfHeight(f.mesh));
+      rnds.push(Math.random(), Math.random());
+    }
+    const slots = planRingPileSlots(n, {
+      radius,
+      groundYBase: groundY,
+      halfHeights,
+      rnds,
+    });
+
+    for (let i = 0; i < n; i++) {
+      const f = live[i]!;
+      const slot = slots[i]!;
       f.bounce = undefined;
       f.tipDrop = undefined;
       f.onStump = false;
@@ -1343,17 +1387,30 @@ export function createFractureWorld(
       f.body.type = CANNON.Body.STATIC;
       f.body.mass = 0;
       f.body.updateMassProperties();
-      const ang = (i / n) * Math.PI * 2 + Math.random() * 0.08;
-      const rad = radius + (Math.random() - 0.5) * 0.35;
+
+      _axisX.set(slot.axisX[0], slot.axisX[1], slot.axisX[2]);
+      _axisY.set(slot.axisY[0], slot.axisY[1], slot.axisY[2]);
+      _axisZ.set(slot.axisZ[0], slot.axisZ[1], slot.axisZ[2]);
+      _basis.makeBasis(_axisX, _axisY, _axisZ);
+      _toQ.setFromRotationMatrix(_basis);
+
       f.recycle = {
-        startAt: now + i * 35,
-        durationMs: 520 + Math.random() * 180,
+        startAt: now + i * RING_PILE_STAGGER_MS,
+        durationMs: RING_PILE_RECYCLE_MS + Math.random() * RING_PILE_RECYCLE_JIT_MS,
         fromX: f.body.position.x,
         fromY: f.body.position.y,
         fromZ: f.body.position.z,
-        toX: Math.cos(ang) * rad,
-        toY: groundY + Math.random() * 0.06,
-        toZ: Math.sin(ang) * rad,
+        toX: slot.x,
+        toY: slot.y,
+        toZ: slot.z,
+        fromQx: f.mesh.quaternion.x,
+        fromQy: f.mesh.quaternion.y,
+        fromQz: f.mesh.quaternion.z,
+        fromQw: f.mesh.quaternion.w,
+        toQx: _toQ.x,
+        toQy: _toQ.y,
+        toQz: _toQ.z,
+        toQw: _toQ.w,
       };
     }
   }

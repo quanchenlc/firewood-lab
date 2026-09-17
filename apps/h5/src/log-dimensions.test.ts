@@ -16,13 +16,18 @@ import {
   LOG_RADIUS_IN_MAX,
   LOG_RADIUS_IN_MIN,
   LOG_RADIUS_TOP,
+  PLAN_ELLIPSE_AMP,
+  PLAN_LOBE3_AMP,
   STUMP_HEIGHT,
   STUMP_TOP_RADIUS,
   barkNoise,
   camLookAtY,
   defaultLogRound,
   logAabbSize,
+  planSilhouetteScale,
+  radialBarkOffsetMetres,
   sampleLogRound,
+  samplePlanRadii,
   type LogRoundDims,
 } from './log-dimensions.ts';
 
@@ -106,5 +111,35 @@ describe('log-dimensions (firewood-scale round)', () => {
     assert.ok(Math.abs(barkNoise(1.7, 42)) <= 1.01);
     assert.notEqual(barkNoise(1.2, 1), barkNoise(1.2, 2));
     assert.ok(BARK_AMP_IN > 0 && BARK_AMP_IN < 1);
+  });
+
+  it('plan silhouette is imperfect — not a constant circle', () => {
+    const scales = [0, 0.4, 1.1, 2.0, 3.3, 4.5].map((a) => planSilhouetteScale(a, 12));
+    const min = Math.min(...scales);
+    const max = Math.max(...scales);
+    assert.ok(max - min > 0.08, `expected visible ellipse/lobe spread, got ${min}..${max}`);
+    assert.ok(PLAN_ELLIPSE_AMP > 0 && PLAN_LOBE3_AMP > 0);
+    // Still roughly round (not a wild star).
+    assert.ok(min > 0.75 && max < 1.25);
+  });
+
+  it('samplePlanRadii shows organic outline (max/min > 1.08)', () => {
+    const dims = { ...defaultLogRound(), barkSeed: 77 };
+    // Unit circle samples at mid-height.
+    const pts = [];
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      pts.push({
+        x: Math.cos(a) * dims.radiusBot,
+        y: 0,
+        z: Math.sin(a) * dims.radiusBot,
+      });
+    }
+    const { min, max, ratio } = samplePlanRadii(pts, dims);
+    assert.ok(min > 0 && max > min);
+    assert.ok(ratio > 1.08, `expected imperfect circle ratio, got ${ratio.toFixed(3)}`);
+    assert.ok(ratio < 1.45, `should stay stump-like, got ${ratio.toFixed(3)}`);
+    // Cap-rim bark offset is non-zero (reference displaces rim verts).
+    assert.notEqual(radialBarkOffsetMetres(0.3, 1, dims.barkSeed), 0);
   });
 });

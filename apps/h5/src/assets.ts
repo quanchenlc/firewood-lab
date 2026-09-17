@@ -3,7 +3,12 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import type { Axe, Species } from '@firewood/game-core';
 import { assetUrl } from './asset-url';
-import { STUMP_BOT_RADIUS, STUMP_HEIGHT, STUMP_TOP_RADIUS } from './log-dimensions';
+import {
+  applyStumpOutlineIrregularity,
+  STUMP_BOT_RADIUS,
+  STUMP_HEIGHT,
+  STUMP_TOP_RADIUS,
+} from './log-dimensions';
 
 export type ProgressFn = (ratio: number, label: string) => void;
 
@@ -229,23 +234,26 @@ export async function buildChoppingBlock(
   });
 
   // Matched to the smaller choppable round in `log-dimensions.ts`.
+  // Organic silhouette (not a clean cylinder) — same plan-noise family as the log.
   const TOP_R = STUMP_TOP_RADIUS;
   const BOT_R = STUMP_BOT_RADIUS;
   const HEIGHT = STUMP_HEIGHT;
+  const stumpSeed = 41;
 
   const root = new THREE.Group();
   root.name = 'chopping-block';
 
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(TOP_R, BOT_R, HEIGHT, 28, 1),
-    barkMat,
-  );
+  const bodyGeo = new THREE.CylinderGeometry(TOP_R, BOT_R, HEIGHT, 32, 4);
+  applyStumpOutlineIrregularity(bodyGeo, { height: HEIGHT, seed: stumpSeed });
+  const body = new THREE.Mesh(bodyGeo, barkMat);
   body.position.y = HEIGHT * 0.5;
   body.castShadow = true;
   body.receiveShadow = true;
   root.add(body);
 
-  const top = new THREE.Mesh(new THREE.CircleGeometry(TOP_R * 0.995, 32), cutMat);
+  const topGeo = new THREE.CircleGeometry(TOP_R * 0.995, 40);
+  applyStumpOutlineIrregularity(topGeo, { height: HEIGHT, seed: stumpSeed, ampIn: 0.28 });
+  const top = new THREE.Mesh(topGeo, cutMat);
   top.rotation.x = -Math.PI / 2;
   top.position.y = HEIGHT + 0.001;
   top.receiveShadow = true;
@@ -253,7 +261,7 @@ export async function buildChoppingBlock(
 
   // Thin rim bevel so the cut edge reads in daylight.
   const rim = new THREE.Mesh(
-    new THREE.TorusGeometry(TOP_R * 0.97, 0.012, 6, 28),
+    new THREE.TorusGeometry(TOP_R * 0.97, 0.012, 6, 36),
     new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.95, metalness: 0 }),
   );
   rim.rotation.x = Math.PI / 2;

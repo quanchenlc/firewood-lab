@@ -86,8 +86,8 @@ export interface LogScene {
  */
 function buildLogGeometry(dims: LogRoundDims): THREE.BufferGeometry {
   // CylinderGeometry default: axis = +Y, caps on top/bottom (end-grain).
-  // 24×4 gives bark noise enough rings without bloating fracture cost.
-  const geo = new THREE.CylinderGeometry(dims.radiusTop, dims.radiusBot, dims.height, 24, 4);
+  // 32×8 matches reference `ow` density so bark + plan lobes read in silhouette.
+  const geo = new THREE.CylinderGeometry(dims.radiusTop, dims.radiusBot, dims.height, 32, 8);
   applyBarkIrregularity(geo, dims);
   return geo;
 }
@@ -487,9 +487,9 @@ export function createLogScene(
 
   function scatterAndRecycle(): void {
     fracture.scatterToGround();
-    // Let physics fling briefly, then pull into the side ring pile.
+    // Let tip-drop finish, then pull into the annular ring pile (ref radius ≈ 60×ld).
     window.setTimeout(() => {
-      fracture.recycleToRing({ radius: 2.4, groundY: 0.06 });
+      fracture.recycleToRing({ groundY: 0 });
     }, 720);
   }
 
