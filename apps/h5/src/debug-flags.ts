@@ -8,7 +8,9 @@
  *   no 4-chop 90° rotate lock)
  * - Impact uses the exact raycast hit point from that click
  * - Force resolves as sweet (mid sweet-zone) so every on-wood hit splits
- * - Same-direction too-thin (< 5″ along cleave normal) → camera ~90° nudge, no chop
+ * - Same-direction too-thin (< 5″ along cleave normal): option A —
+ *   both horizontal dirs too thin OR already firewood (vol/aspect) → toss to ground;
+ *   else camera ~90° nudge, no chop
  *
  * Miss (click not on wood/log) still does nothing.
  *

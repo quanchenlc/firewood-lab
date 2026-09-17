@@ -29,6 +29,8 @@ export {
   horizontalAspectFromSize,
   thicknessInchesAlong,
   isTooThinToSplit,
+  decideTooThinChop,
+  shouldTossOnTooThin,
   azimuthNudgeVelocity,
   lateralOffsetFromDiameter,
   INCH,
@@ -51,4 +53,5 @@ export {
   type FracturePlanInput,
   type FractureAxeStats,
   type SplitStyle,
+  type TooThinChopDecision,
 } from './fracture-plan.ts';

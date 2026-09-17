@@ -112,6 +112,13 @@ export interface FractureWorld {
   isTooThinAlongNormal(mesh: THREE.Mesh, normal: THREE.Vector3): boolean;
   /** Thickness in inches along a world-space cleave normal. */
   thicknessInchesAlongNormal(mesh: THREE.Mesh, normal: THREE.Vector3): number;
+  /** Volume/aspect firewood gate for a live mesh (same helpers as post-split). */
+  isFirewoodMesh(mesh: THREE.Mesh): boolean;
+  /**
+   * Mark a stump piece (or whole log) as firewood and toss it to the ground
+   * with the same outward impulse path used for classified chips.
+   */
+  tossAsFirewood(mesh: THREE.Mesh, opts?: { planeNormal?: THREE.Vector3 }): boolean;
   disposeMesh(mesh: THREE.Object3D, disposeMaterials?: boolean): void;
 }
 
@@ -1066,6 +1073,115 @@ export function createFractureWorld(
     }
   }
 
+  /** Rebuild a static stump body as dynamic (shared by scatter + single toss). */
+  function ensureDynamicBody(f: PhysFragment): void {
+    if (f.body.type !== CANNON.Body.STATIC && f.body.mass !== 0) return;
+    const pos = f.body.position.clone();
+    const quat = f.body.quaternion.clone();
+    world.removeBody(f.body);
+    const box = new THREE.Box3().setFromObject(f.mesh);
+    const size = box.getSize(new THREE.Vector3());
+    const half = new CANNON.Vec3(
+      Math.max(0.04, size.x * 0.46),
+      Math.max(0.04, size.y * 0.46),
+      Math.max(0.04, size.z * 0.46),
+    );
+    const volume = Math.max(0.002, size.x * size.y * size.z);
+    f.body = new CANNON.Body({
+      mass: Math.max(0.1, volume * 180),
+      type: CANNON.Body.DYNAMIC,
+      shape: new CANNON.Box(half),
+      material: woodMat,
+      position: pos,
+      quaternion: quat,
+      linearDamping: 0.55,
+      angularDamping: 0.62,
+      allowSleep: true,
+    });
+    world.addBody(f.body);
+  }
+
+  /** Apply outward firewood-chip impulse (matches post-split toss feel). */
+  function applyFirewoodTossImpulse(
+    f: PhysFragment,
+    planeNormal?: THREE.Vector3,
+  ): void {
+    const px = f.body.position.x;
+    const pz = f.body.position.z;
+    const radialLen = Math.hypot(px, pz) || 1;
+    let ox = px / radialLen;
+    let oz = pz / radialLen;
+    if (planeNormal) {
+      const n = planeNormal.clone().setY(0);
+      if (n.lengthSq() > 1e-8) {
+        n.normalize();
+        const side = Math.sign(ox * n.x + oz * n.z) || 1;
+        ox = n.x * side;
+        oz = n.z * side;
+      }
+    }
+    f.body.velocity.set(
+      ox * (1.2 + Math.random() * 0.6) + (Math.random() - 0.5) * 0.35,
+      1.4 + Math.random() * 0.8,
+      oz * (1.2 + Math.random() * 0.6) + (Math.random() - 0.5) * 0.35,
+    );
+    f.body.angularVelocity.set(
+      (Math.random() - 0.5) * 4,
+      (Math.random() - 0.5) * 3,
+      (Math.random() - 0.5) * 4,
+    );
+    f.body.wakeUp();
+  }
+
+  /**
+   * Convert one stump piece (or the still-whole log) into a dynamic firewood
+   * chip and toss it outward — option A bridge when too-thin + finished.
+   */
+  function tossAsFirewood(
+    mesh: THREE.Mesh,
+    opts?: { planeNormal?: THREE.Vector3 },
+  ): boolean {
+    const now = performance.now();
+    let f = fragments.find((x) => x.mesh === mesh);
+    if (!f) {
+      // Whole log / unregistered mesh: register as a dynamic firewood chip.
+      if (!(mesh as DestructibleMesh).geometry) return false;
+      const body = makeBodyFromMesh(mesh, 1.2, false);
+      world.addBody(body);
+      f = {
+        mesh: mesh as DestructibleMesh,
+        body,
+        generation: (mesh.userData.generation as number) ?? 0,
+        splittable: false,
+        bornAt: now,
+        settleUntil: now + 900,
+        onStump: false,
+      };
+      mesh.userData.phys = f;
+      mesh.userData.role = 'fragment';
+      fragments.push(f);
+    } else {
+      f.bounce = undefined;
+      f.recycle = undefined;
+      f.onStump = false;
+      f.splittable = false;
+      f.settleUntil = now + 900;
+      ensureDynamicBody(f);
+    }
+    applyFirewoodTossImpulse(f, opts?.planeNormal);
+    console.info('[firewood] tossAsFirewood', {
+      gen: f.generation,
+      pos: [f.body.position.x, f.body.position.y, f.body.position.z],
+    });
+    return true;
+  }
+
+  function isFirewoodMesh(mesh: THREE.Mesh): boolean {
+    const box = new THREE.Box3().setFromObject(mesh);
+    const size = box.getSize(new THREE.Vector3());
+    return classifyFirewood(mesh, size).firewood;
+  }
+
   /** Convert stump halves to dynamic bodies and fling them outward onto the ground. */
   function scatterToGround(): void {
     const now = performance.now();
@@ -1075,32 +1191,8 @@ export function createFractureWorld(
       f.onStump = false;
       f.splittable = false;
       f.settleUntil = now + 900;
-      // Rebuild as dynamic if currently static.
-      if (f.body.type === CANNON.Body.STATIC || f.body.mass === 0) {
-        const pos = f.body.position.clone();
-        const quat = f.body.quaternion.clone();
-        world.removeBody(f.body);
-        const box = new THREE.Box3().setFromObject(f.mesh);
-        const size = box.getSize(new THREE.Vector3());
-        const half = new CANNON.Vec3(
-          Math.max(0.04, size.x * 0.46),
-          Math.max(0.04, size.y * 0.46),
-          Math.max(0.04, size.z * 0.46),
-        );
-        const volume = Math.max(0.002, size.x * size.y * size.z);
-        f.body = new CANNON.Body({
-          mass: Math.max(0.1, volume * 180),
-          type: CANNON.Body.DYNAMIC,
-          shape: new CANNON.Box(half),
-          material: woodMat,
-          position: pos,
-          quaternion: quat,
-          linearDamping: 0.55,
-          angularDamping: 0.62,
-          allowSleep: true,
-        });
-        world.addBody(f.body);
-      }
+      ensureDynamicBody(f);
+      // Round-end scatter uses a slightly stronger outward fling than chip toss.
       const px = f.body.position.x;
       const pz = f.body.position.z;
       const len = Math.hypot(px, pz) || 1;
@@ -1181,6 +1273,8 @@ export function createFractureWorld(
     fractureMesh,
     isTooThinAlongNormal,
     thicknessInchesAlongNormal,
+    isFirewoodMesh,
+    tossAsFirewood,
     disposeMesh,
   };
 }

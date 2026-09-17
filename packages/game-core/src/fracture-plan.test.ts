@@ -17,12 +17,14 @@ import {
   azimuthNudgeVelocity,
   horizontalAspectFromSize,
   horizontalAspectXZ,
+  decideTooThinChop,
   isFirewoodByVolumeAspect,
   isFirewoodChip,
   isRechopWorthy,
   isTooThinToSplit,
   lateralOffsetFromDiameter,
   planFracture,
+  shouldTossOnTooThin,
   thicknessInchesAlong,
   volumeInchesFromBBox,
 } from './fracture-plan.ts';
@@ -234,5 +236,63 @@ describe('too-thin / azimuth nudge', () => {
     }
     assert.ok(Math.abs(yaw - Math.PI / 2) < 1e-6);
     assert.ok(azimuthNudgeVelocity(-1) < 0);
+  });
+});
+
+describe('option A decideTooThinChop', () => {
+  it('thick enough along current dir → chop', () => {
+    assert.equal(
+      decideTooThinChop({
+        currentThicknessIn: 6,
+        perpThicknessIn: 4,
+        alreadyFirewood: true,
+      }),
+      'chop',
+    );
+  });
+
+  it('both horizontal dirs too thin → toss', () => {
+    assert.equal(
+      decideTooThinChop({
+        currentThicknessIn: 4,
+        perpThicknessIn: 4.5,
+        alreadyFirewood: false,
+      }),
+      'toss',
+    );
+    assert.equal(
+      shouldTossOnTooThin({ otherDirTooThin: true, alreadyFirewood: false }),
+      true,
+    );
+  });
+
+  it('already firewood-sized → toss even if perp still thick', () => {
+    assert.equal(
+      decideTooThinChop({
+        currentThicknessIn: 3,
+        perpThicknessIn: 8,
+        alreadyFirewood: true,
+      }),
+      'toss',
+    );
+    assert.equal(
+      shouldTossOnTooThin({ otherDirTooThin: false, alreadyFirewood: true }),
+      true,
+    );
+  });
+
+  it('only current dir thin + not firewood → yaw', () => {
+    assert.equal(
+      decideTooThinChop({
+        currentThicknessIn: 4,
+        perpThicknessIn: 8,
+        alreadyFirewood: false,
+      }),
+      'yaw',
+    );
+    assert.equal(
+      shouldTossOnTooThin({ otherDirTooThin: false, alreadyFirewood: false }),
+      false,
+    );
   });
 });

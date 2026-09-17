@@ -370,6 +370,32 @@ export function isTooThinToSplit(thicknessInches: number): boolean {
 }
 
 /**
+ * Option A — too-thin click decision (current cleave dir already measured):
+ * - current thick enough → chop normally
+ * - current thin AND (perp also thin OR already firewood by vol/aspect) → toss to ground
+ * - current thin AND perp still thick AND not yet firewood → yaw ~90°, stay on stump
+ */
+export type TooThinChopDecision = 'chop' | 'yaw' | 'toss';
+
+export function decideTooThinChop(input: {
+  currentThicknessIn: number;
+  perpThicknessIn: number;
+  alreadyFirewood: boolean;
+}): TooThinChopDecision {
+  if (!isTooThinToSplit(input.currentThicknessIn)) return 'chop';
+  if (isTooThinToSplit(input.perpThicknessIn) || input.alreadyFirewood) return 'toss';
+  return 'yaw';
+}
+
+/** Convenience: when already inside a too-thin branch, should we toss? */
+export function shouldTossOnTooThin(input: {
+  otherDirTooThin: boolean;
+  alreadyFirewood: boolean;
+}): boolean {
+  return input.otherDirTooThin || input.alreadyFirewood;
+}
+
+/**
  * Initial azimuth velocity so geometric damping totals ≈ ±90°.
  * Per frame: yaw += v; v *= AZIMUTH_NUDGE_DAMP → Σ = v0 / (1 - damp) = ±π/2.
  */
