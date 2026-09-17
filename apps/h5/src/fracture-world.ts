@@ -5,12 +5,17 @@ import {
   BOUNCE_TILT_DEG,
   BOUNCE_YAW_JITTER_DEG,
   cleaveNormalXZ,
+  horizontalAspectFromSize,
+  horizontalAspectXZ,
   INCH,
-  isFirewoodChip,
+  isFirewoodByVolumeAspect,
   isRechopWorthy,
+  isTooThinToSplit,
   MAX_LIVE_FRAGMENTS,
   MIN_RECHOP_DIAGONAL,
+  thicknessInchesAlong,
   TINY_CHIP_DIAGONAL,
+  volumeInchesFromBBox,
   type FracturePlan,
 } from '@firewood/game-core';
 
@@ -100,6 +105,13 @@ export interface FractureWorld {
     scene: THREE.Scene,
     opts?: { planeNormal?: THREE.Vector3 },
   ): PhysFragment[];
+  /**
+   * True when the mesh is thinner than 5″ along the cleave normal
+   * (reference too-thin gate — nudge camera instead of chopping).
+   */
+  isTooThinAlongNormal(mesh: THREE.Mesh, normal: THREE.Vector3): boolean;
+  /** Thickness in inches along a world-space cleave normal. */
+  thicknessInchesAlongNormal(mesh: THREE.Mesh, normal: THREE.Vector3): number;
   disposeMesh(mesh: THREE.Object3D, disposeMaterials?: boolean): void;
 }
 
@@ -215,6 +227,57 @@ export function createFractureWorld(
   function bboxDiagonal(mesh: THREE.Mesh): number {
     const box = new THREE.Box3().setFromObject(mesh);
     return box.getSize(new THREE.Vector3()).length();
+  }
+
+  /** Reference `hT`: PCA aspect of local XZ verts; bbox fallback. */
+  function pieceHorizontalAspect(mesh: THREE.Mesh): number {
+    const pos = mesh.geometry?.getAttribute('position');
+    if (pos && pos.count > 0) {
+      const xs = new Float32Array(pos.count);
+      const zs = new Float32Array(pos.count);
+      for (let i = 0; i < pos.count; i++) {
+        xs[i] = pos.getX(i);
+        zs[i] = pos.getZ(i);
+      }
+      return horizontalAspectXZ(xs, zs);
+    }
+    const box = new THREE.Box3().setFromObject(mesh);
+    const size = box.getSize(new THREE.Vector3());
+    return horizontalAspectFromSize(size.x, size.z);
+  }
+
+  /** Classify stump vs firewood using volume (in³) + horizontal aspect. */
+  function classifyFirewood(mesh: THREE.Mesh, size: THREE.Vector3): boolean {
+    const volumeInches = volumeInchesFromBBox(size.x, size.y, size.z);
+    const aspect = pieceHorizontalAspect(mesh);
+    return isFirewoodByVolumeAspect(volumeInches, aspect);
+  }
+
+  /**
+   * Thickness along world cleave normal in inches (reference `pT`).
+   * Projects geometry verts through matrixWorld onto the unit normal.
+   */
+  function thicknessInchesAlongNormal(mesh: THREE.Mesh, normal: THREE.Vector3): number {
+    mesh.updateMatrixWorld(true);
+    const pos = mesh.geometry?.getAttribute('position');
+    if (!pos || pos.count === 0) {
+      const box = new THREE.Box3().setFromObject(mesh);
+      const size = box.getSize(new THREE.Vector3());
+      const n = normal.clone().normalize();
+      const extent = Math.abs(size.x * n.x) + Math.abs(size.y * n.y) + Math.abs(size.z * n.z);
+      return thicknessInchesAlong(extent);
+    }
+    const n = normal.clone().normalize();
+    const v = new THREE.Vector3();
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+      const d = v.dot(n);
+      if (d < min) min = d;
+      if (d > max) max = d;
+    }
+    return thicknessInchesAlong(max - min);
   }
 
   /** Per-side slide so both halves open `gapFrac * diameter` face gap. */
@@ -726,7 +789,7 @@ export function createFractureWorld(
       const box0 = new THREE.Box3().setFromObject(fragment);
       const size0 = box0.getSize(new THREE.Vector3());
       const center0 = box0.getCenter(new THREE.Vector3());
-      const firewood = isFirewoodChip(size0.x, size0.y, size0.z);
+      const firewood = classifyFirewood(fragment, size0);
       const onStump = !firewood;
 
       const body = makeBodyFromMesh(fragment, plan.messy ? 1.15 : 1.35, onStump);
@@ -1061,6 +1124,10 @@ export function createFractureWorld(
     return fragments.some((f) => !!f.recycle);
   }
 
+  function isTooThinAlongNormal(mesh: THREE.Mesh, normal: THREE.Vector3): boolean {
+    return isTooThinToSplit(thicknessInchesAlongNormal(mesh, normal));
+  }
+
   return {
     world,
     fragments,
@@ -1080,6 +1147,8 @@ export function createFractureWorld(
     recycleToRing,
     isRecycling,
     fractureMesh,
+    isTooThinAlongNormal,
+    thicknessInchesAlongNormal,
     disposeMesh,
   };
 }

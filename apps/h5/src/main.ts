@@ -24,7 +24,7 @@ type Phase = 'aim' | 'power' | 'result';
 const platform = createH5Platform();
 platform.storage.setItem(
   'firewood.h5.loop',
-  DEBUG_DIRECT_CHOP ? 'debug-direct-chop-v1' : 'camera-facing-recycle-v1',
+  DEBUG_DIRECT_CHOP ? 'debug-direct-chop-drop-nudge-v1' : 'camera-facing-recycle-v1',
 );
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
@@ -369,6 +369,36 @@ async function boot(): Promise<void> {
       ? phase === 'aim' || phase === 'power'
       : phase === 'power';
     if (!phaseOk || !aimPoint || !aimTarget || chopping || roundFinishing) return;
+
+    // Cleave plane first — need it for the too-thin thickness gate.
+    let planeNormal: THREE.Vector3;
+    if (DEBUG_DIRECT_CHOP) {
+      planeNormal = liveCleaveFromCamera();
+      lockedCleaveNormal = null;
+    } else {
+      if (!lockedCleaveNormal) lockCleaveFromCamera();
+      planeNormal = lockedCleaveNormal!.clone();
+    }
+
+    // Same-direction too thin (< 5″ along cleave normal): nudge camera ~90°, no chop.
+    if (logScene.fracture.isTooThinAlongNormal(aimTarget, planeNormal)) {
+      const sign = pointerNdc.x < 0 ? -1 : 1;
+      const inches = logScene.fracture.thicknessInchesAlongNormal(aimTarget, planeNormal);
+      logScene.nudgeAzimuth(sign);
+      resultEl.textContent = '太薄 · 换角度';
+      resultEl.className = 'result too_light';
+      if (resultFadeTimer !== null) window.clearTimeout(resultFadeTimer);
+      resultFadeTimer = window.setTimeout(() => {
+        resultFadeTimer = null;
+        resultEl.classList.add('is-fading');
+      }, 1100);
+      console.info('[firewood] too-thin nudge', { inches: +inches.toFixed(2), sign });
+      aimPoint = null;
+      aimTarget = null;
+      setPhase('aim');
+      return;
+    }
+
     clearChopTimers();
     chopping = true;
     // Debug: always sweet mid-zone. Production: sample rhythm knob.
@@ -389,17 +419,6 @@ async function boot(): Promise<void> {
     const point = aimPoint.clone();
     const generation = aimGeneration;
     const rebound = outcome === 'too_light';
-
-    // Critical: cleave plane from LIVE camera facing at chop time when debug-direct.
-    // Production keeps the locked normal (+ optional 4→90° rotate).
-    let planeNormal: THREE.Vector3;
-    if (DEBUG_DIRECT_CHOP) {
-      planeNormal = liveCleaveFromCamera();
-      lockedCleaveNormal = null;
-    } else {
-      if (!lockedCleaveNormal) lockCleaveFromCamera();
-      planeNormal = lockedCleaveNormal!.clone();
-    }
 
     // Always swing top→down in the vertical plane; rebound when force is too light.
     logScene.playAxeSwing(point, { rebound });
@@ -650,7 +669,25 @@ async function boot(): Promise<void> {
     },
     fragmentCount: () => logScene.fracture.fragments.length,
     splittableCount: () => logScene.fracture.fragments.filter((f) => f.splittable).length,
+    firewoodCount: () => logScene.fracture.fragments.filter((f) => !f.onStump).length,
+    stumpCount: () => logScene.fracture.fragments.filter((f) => f.onStump).length,
     isRecycling: () => logScene.isRecycling(),
+    nudgeAzimuth: (sign: number) => logScene.nudgeAzimuth(sign),
+    getOrbit: () => logScene.getOrbit(),
+    /** Thickness (inches) of aim target along live cleave normal. */
+    aimThicknessIn: () => {
+      if (!aimTarget) return null;
+      return logScene.fracture.thicknessInchesAlongNormal(aimTarget, liveCleaveFromCamera());
+    },
+    isAimTooThin: () => {
+      if (!aimTarget) return false;
+      return logScene.fracture.isTooThinAlongNormal(aimTarget, liveCleaveFromCamera());
+    },
+    setPointerNdc: (x: number, y: number) => {
+      pointerNdc.x = x;
+      pointerNdc.y = y;
+    },
+    getResultText: () => resultEl.textContent,
     /** Demo/test: force scatter→ring even if pieces remain. */
     forceFinish: () => {
       if (roundFinishing) return true;

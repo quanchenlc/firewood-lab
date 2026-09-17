@@ -31,6 +31,20 @@ export type SplitStyle = 'nick' | 'cleave' | 'cleave_messy';
 
 /** Metres per inch — screen.toys unit scale `ld = 0.0254`. */
 export const INCH = 0.0254;
+/**
+ * Reference firewood volume gate (cubic inches), from screen.toys `performSplit`.
+ * Volume uses AABB × fill factor then ÷ INCH³ (see `volumeInchesFromBBox`).
+ */
+export const FIREWOOD_VOL_ABS_MIN = 250;
+export const FIREWOOD_VOL_MAX = 500;
+/** Horizontal PCA aspect above this + vol in (250, 500] → rescue (stay on stump). */
+export const FIREWOOD_ASPECT_RESCUE = 3;
+/** Bbox fill factor matching reference `iw` (AABB volume × 0.7). */
+export const VOLUME_BBOX_FILL = 0.7;
+/** Minimum cleave-direction thickness in inches (`Xu * 2`, Xu = 2.5). */
+export const MIN_SPLIT_THICKNESS_IN = 5;
+/** Per-frame azimuth damping for ~90° camera nudge (`fd = 0.92`). */
+export const AZIMUTH_NUDGE_DAMP = 0.92;
 /** Target face-to-face gap as a fraction of the pre-split log diameter.
  * Modest crack: ~0.2× diameter total (~1–2″ per side on a ~0.8 m round).
  * Tuned down hard from the previous ~0.5–0.7× "wide dump" feel.
@@ -217,18 +231,135 @@ export function isRechopWorthy(bboxDiagonal: number, generation: number): boolea
 }
 
 /**
- * Reference firewood gate: too-small or bad aspect → physics pile throw.
- * Main upright halves stay on the stump with scripted bounce.
+ * AABB volume in cubic inches (reference `aw` = size product × 0.7 / ld³).
+ */
+export function volumeInchesFromBBox(
+  sizeX: number,
+  sizeY: number,
+  sizeZ: number,
+  fill: number = VOLUME_BBOX_FILL,
+): number {
+  const cubicMetres = Math.max(0, sizeX) * Math.max(0, sizeY) * Math.max(0, sizeZ) * fill;
+  return cubicMetres / (INCH * INCH * INCH);
+}
+
+/**
+ * Horizontal aspect ratio (reference `hT`): PCA major/minor extent in XZ.
+ * `xs`/`zs` are local-space vertex coordinates (same frame as geometry attribute).
+ */
+export function horizontalAspectXZ(xs: ArrayLike<number>, zs: ArrayLike<number>): number {
+  const n = Math.min(xs.length, zs.length);
+  if (n <= 0) return 1;
+
+  let meanX = 0;
+  let meanZ = 0;
+  for (let i = 0; i < n; i++) {
+    meanX += xs[i]!;
+    meanZ += zs[i]!;
+  }
+  meanX /= n;
+  meanZ /= n;
+
+  let xx = 0;
+  let xz = 0;
+  let zz = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i]! - meanX;
+    const dz = zs[i]! - meanZ;
+    xx += dx * dx;
+    xz += dx * dz;
+    zz += dz * dz;
+  }
+
+  const trace = xx + zz;
+  const det = xx * zz - xz * xz;
+  const lambda = (trace + Math.sqrt(Math.max(0, trace * trace - 4 * det))) / 2;
+  let ax: number;
+  let az: number;
+  if (Math.abs(xz) > 1e-10) {
+    ax = xz;
+    az = lambda - xx;
+  } else {
+    ax = 1;
+    az = 0;
+  }
+  const len = Math.hypot(ax, az) || 1;
+  ax /= len;
+  az /= len;
+  const bx = -az;
+  const bz = ax;
+
+  let minA = Infinity;
+  let maxA = -Infinity;
+  let minB = Infinity;
+  let maxB = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i]! - meanX;
+    const dz = zs[i]! - meanZ;
+    const a = dx * ax + dz * az;
+    const b = dx * bx + dz * bz;
+    if (a < minA) minA = a;
+    if (a > maxA) maxA = a;
+    if (b < minB) minB = b;
+    if (b > maxB) maxB = b;
+  }
+  const extentA = maxA - minA;
+  const extentB = maxB - minB;
+  if (extentA < 1e-10 || extentB < 1e-10) return 1;
+  return Math.max(extentA, extentB) / Math.min(extentA, extentB);
+}
+
+/** Bbox fallback when vertex lists are unavailable: max(x,z) / min(x,z). */
+export function horizontalAspectFromSize(sizeX: number, sizeZ: number): number {
+  const a = Math.max(1e-10, Math.abs(sizeX));
+  const b = Math.max(1e-10, Math.abs(sizeZ));
+  return Math.max(a, b) / Math.min(a, b);
+}
+
+/**
+ * Reference firewood gate (screen.toys `performSplit`):
+ * - vol ≤ 250 → firewood (toss)
+ * - vol ≤ 500 AND aspect ≤ 3 → firewood (toss)
+ * - vol in (250, 500] AND aspect > 3 → rescue (stay on stump)
+ * - vol > 500 → stay on stump
+ */
+export function isFirewoodByVolumeAspect(
+  volumeInches: number,
+  horizontalAspect: number,
+): boolean {
+  if (volumeInches > FIREWOOD_VOL_MAX) return false;
+  if (volumeInches <= FIREWOOD_VOL_ABS_MIN) return true;
+  // (250, 500]: slender pieces are rescued for another orientation.
+  return horizontalAspect <= FIREWOOD_ASPECT_RESCUE;
+}
+
+/**
+ * Convenience: bbox sizes → firewood? (uses bbox XZ aspect fallback).
+ * Prefer `isFirewoodByVolumeAspect` + `horizontalAspectXZ` when geometry is available.
  */
 export function isFirewoodChip(sizeX: number, sizeY: number, sizeZ: number): boolean {
-  const diag = Math.hypot(sizeX, sizeY, sizeZ);
-  if (diag < MIN_RECHOP_DIAGONAL * 0.85) return true;
-  const horiz = Math.hypot(sizeX, sizeZ);
-  const aspect = sizeY / Math.max(1e-6, horiz);
-  // Pancake flakes or needle shards leave the stump.
-  if (aspect < 0.32 || aspect > 3.6) return true;
-  if (horiz < 0.14) return true;
-  return false;
+  const volumeInches = volumeInchesFromBBox(sizeX, sizeY, sizeZ);
+  const aspect = horizontalAspectFromSize(sizeX, sizeZ);
+  return isFirewoodByVolumeAspect(volumeInches, aspect);
+}
+
+/** Thickness along a unit direction, in inches (`extentMetres / INCH`). */
+export function thicknessInchesAlong(extentMetres: number): number {
+  return Math.max(0, extentMetres) / INCH;
+}
+
+/** True when piece is thinner than Xu*2 = 5″ along the cleave normal. */
+export function isTooThinToSplit(thicknessInches: number): boolean {
+  return thicknessInches < MIN_SPLIT_THICKNESS_IN;
+}
+
+/**
+ * Initial azimuth velocity so geometric damping totals ≈ ±90°.
+ * Per frame: yaw += v; v *= AZIMUTH_NUDGE_DAMP → Σ = v0 / (1 - damp) = ±π/2.
+ */
+export function azimuthNudgeVelocity(sign: number): number {
+  const s = sign < 0 ? -1 : 1;
+  return ((Math.PI / 180) * 90 * (1 - AZIMUTH_NUDGE_DAMP)) * s;
 }
 
 /**

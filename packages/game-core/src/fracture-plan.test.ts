@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  AZIMUTH_NUDGE_DAMP,
   BOUNCE_DURATION_MS,
   BOUNCE_POP_HEIGHT,
   cleaveNormalXZ,
@@ -9,10 +10,21 @@ import {
   advanceOrientChopCount,
   CHOPS_BEFORE_ORIENT_ROTATE,
   FACE_GAP_DIAMETER_FRAC,
+  FIREWOOD_ASPECT_RESCUE,
+  FIREWOOD_VOL_ABS_MIN,
+  FIREWOOD_VOL_MAX,
+  MIN_SPLIT_THICKNESS_IN,
+  azimuthNudgeVelocity,
+  horizontalAspectFromSize,
+  horizontalAspectXZ,
+  isFirewoodByVolumeAspect,
   isFirewoodChip,
   isRechopWorthy,
+  isTooThinToSplit,
   lateralOffsetFromDiameter,
   planFracture,
+  thicknessInchesAlong,
+  volumeInchesFromBBox,
 } from './fracture-plan.ts';
 
 describe('planFracture', () => {
@@ -163,14 +175,60 @@ describe('isRechopWorthy', () => {
   });
 });
 
-describe('isFirewoodChip', () => {
-  it('keeps upright half-log proportions on the stump', () => {
-    // Half cylinder-ish: ~0.4 × 0.7 × 0.4
-    assert.equal(isFirewoodChip(0.4, 0.7, 0.4), false);
+describe('volume / aspect firewood gate', () => {
+  it('volumeInchesFromBBox uses fill × / INCH³', () => {
+    // 0.1³ m × 0.7 / 0.0254³ ≈ 42.73 in³
+    const v = volumeInchesFromBBox(0.1, 0.1, 0.1);
+    assert.ok(Math.abs(v - 42.73) < 0.1);
   });
 
-  it('flags tiny chips and pancake flakes as firewood', () => {
-    assert.equal(isFirewoodChip(0.08, 0.05, 0.08), true);
-    assert.equal(isFirewoodChip(0.5, 0.08, 0.4), true);
+  it('isFirewoodByVolumeAspect matches reference thresholds', () => {
+    // ≤250 → always firewood
+    assert.equal(isFirewoodByVolumeAspect(FIREWOOD_VOL_ABS_MIN, 10), true);
+    assert.equal(isFirewoodByVolumeAspect(100, 1), true);
+    // (250, 500] + aspect ≤ 3 → firewood
+    assert.equal(isFirewoodByVolumeAspect(400, FIREWOOD_ASPECT_RESCUE), true);
+    assert.equal(isFirewoodByVolumeAspect(400, 2), true);
+    // (250, 500] + aspect > 3 → rescue (stay)
+    assert.equal(isFirewoodByVolumeAspect(400, 3.1), false);
+    // >500 → stay
+    assert.equal(isFirewoodByVolumeAspect(FIREWOOD_VOL_MAX + 1, 1), false);
+  });
+
+  it('keeps large half-log on stump; tiny cube becomes firewood', () => {
+    // Half cylinder-ish: ~0.4 × 0.7 × 0.4 → thousands of in³
+    assert.equal(isFirewoodChip(0.4, 0.7, 0.4), false);
+    // ~0.08³ m × 0.7 ≈ 219 in³ ≤ 250 → firewood
+    assert.equal(isFirewoodChip(0.08, 0.08, 0.08), true);
+  });
+
+  it('rescues slender mid-volume pieces via horizontalAspectXZ', () => {
+    // Elongated in X, thin in Z → high aspect
+    const xs = [-0.2, 0.2, -0.2, 0.2];
+    const zs = [-0.03, -0.03, 0.03, 0.03];
+    const aspect = horizontalAspectXZ(xs, zs);
+    assert.ok(aspect > FIREWOOD_ASPECT_RESCUE);
+    assert.equal(horizontalAspectFromSize(0.4, 0.06) > 3, true);
+  });
+});
+
+describe('too-thin / azimuth nudge', () => {
+  it('flags thickness under Xu*2 = 5 inches', () => {
+    assert.equal(MIN_SPLIT_THICKNESS_IN, 5);
+    assert.equal(isTooThinToSplit(4.9), true);
+    assert.equal(isTooThinToSplit(5), false);
+    assert.ok(Math.abs(thicknessInchesAlong(5 * 0.0254) - 5) < 1e-9);
+  });
+
+  it('azimuth nudge velocity integrates to ~±90° under damping', () => {
+    const v0 = azimuthNudgeVelocity(1);
+    let yaw = 0;
+    let v = v0;
+    for (let i = 0; i < 200; i++) {
+      yaw += v;
+      v *= AZIMUTH_NUDGE_DAMP;
+    }
+    assert.ok(Math.abs(yaw - Math.PI / 2) < 1e-6);
+    assert.ok(azimuthNudgeVelocity(-1) < 0);
   });
 });
