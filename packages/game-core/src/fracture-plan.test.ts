@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { cleaveNormalXZ, isRechopWorthy, planFracture } from './fracture-plan.ts';
+import {
+  BOUNCE_DURATION_MS,
+  BOUNCE_POP_HEIGHT,
+  cleaveNormalXZ,
+  FACE_GAP_DIAMETER_FRAC,
+  isFirewoodChip,
+  isRechopWorthy,
+  lateralOffsetFromDiameter,
+  planFracture,
+} from './fracture-plan.ts';
 
 describe('planFracture', () => {
   it('too_light is nick-only with zero fragments', () => {
@@ -10,9 +19,10 @@ describe('planFracture', () => {
     assert.equal(p.messy, false);
     assert.equal(p.splitStyle, 'nick');
     assert.equal(p.wedgeGap, 0);
+    assert.equal(p.popHeight, 0);
   });
 
-  it('sweet is a clean 2-way directional cleave', () => {
+  it('sweet is a clean 2-way cleave with ~half-diameter face gap frac', () => {
     const p = planFracture({
       outcome: 'sweet',
       axe: { weight: 0.5, edge: 0.6 },
@@ -23,7 +33,11 @@ describe('planFracture', () => {
     assert.equal(p.splitStyle, 'cleave');
     assert.ok(p.impulse > 0);
     assert.ok(p.impulse < 0.35, 'sweet impulse stays a wedged nudge, not a burst');
-    assert.ok(p.wedgeGap > 0.018 && p.wedgeGap < 0.06);
+    // Live reference: face gap ≈ 0.5 × log diameter (wedgeGap stores the fraction).
+    assert.ok(Math.abs(p.wedgeGap - FACE_GAP_DIAMETER_FRAC) < 1e-9);
+    assert.ok(p.wedgeGap >= 0.45 && p.wedgeGap <= 0.85);
+    assert.ok(Math.abs(p.popHeight - BOUNCE_POP_HEIGHT) < 1e-9);
+    assert.equal(p.bounceMs, BOUNCE_DURATION_MS);
   });
 
   it('too_heavy is messier with more fragments than sweet, still cleave', () => {
@@ -55,6 +69,13 @@ describe('planFracture', () => {
   });
 });
 
+describe('lateralOffsetFromDiameter', () => {
+  it('splits face-gap frac across both halves', () => {
+    // diameter 0.8, gap 0.5 → each side 0.2
+    assert.ok(Math.abs(lateralOffsetFromDiameter(0.8, 0.5) - 0.2) < 1e-9);
+  });
+});
+
 describe('cleaveNormalXZ', () => {
   it('returns a unit normal perpendicular to the radial in XZ', () => {
     const [nx, nz] = cleaveNormalXZ(1, 0, 0, 0);
@@ -76,5 +97,17 @@ describe('isRechopWorthy', () => {
     assert.equal(isRechopWorthy(0.5, 5), false);
     assert.equal(isRechopWorthy(0.5, 2), true);
     assert.equal(isRechopWorthy(0.5, 0), true);
+  });
+});
+
+describe('isFirewoodChip', () => {
+  it('keeps upright half-log proportions on the stump', () => {
+    // Half cylinder-ish: ~0.4 × 0.7 × 0.4
+    assert.equal(isFirewoodChip(0.4, 0.7, 0.4), false);
+  });
+
+  it('flags tiny chips and pancake flakes as firewood', () => {
+    assert.equal(isFirewoodChip(0.08, 0.05, 0.08), true);
+    assert.equal(isFirewoodChip(0.5, 0.08, 0.4), true);
   });
 });

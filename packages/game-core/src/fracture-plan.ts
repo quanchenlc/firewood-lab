@@ -4,6 +4,11 @@
  *
  * Directional cleave: prefer a vertical chop plane through the aim point
  * (grain-aligned / planar split) over isotropic Voronoi burst.
+ *
+ * Settle feel mirrors reverse-engineered screen.toys/firewood `performSplit`
+ * bounce (logic only — not assets). Live reference screenshots show an
+ * obvious lateral 错开 ≈ half the original log diameter (both halves move),
+ * not a hairline 1″ crack.
  */
 
 import type { ChopOutcome } from './chop-types.ts';
@@ -25,16 +30,36 @@ export interface FracturePlanInput {
 /** How the H5 layer should open the wood. */
 export type SplitStyle = 'nick' | 'cleave' | 'cleave_messy';
 
+/** Metres per inch — screen.toys unit scale `ld = 0.0254`. */
+export const INCH = 0.0254;
+/** Target face-to-face gap as a fraction of the pre-split log diameter.
+ * Live screen.toys first-chop reads ≈ 0.5× diameter (both halves slide out).
+ * Tuned slightly above 0.5 so foreshortened camera views still read as obvious 错开.
+ */
+export const FACE_GAP_DIAMETER_FRAC = 0.7;
+/** Peak pop height during settle (metres) — keep subtle; main motion is lateral. */
+export const BOUNCE_POP_HEIGHT = 0.04;
+/** Scripted slide duration in ms. */
+export const BOUNCE_DURATION_MS = 160;
+/** Random yaw jitter applied to each stump half (±degrees) — tiny, stay upright. */
+export const BOUNCE_YAW_JITTER_DEG = 1.5;
+/** Mid-bounce tilt (degrees) — reference stays upright; keep near-zero tip. */
+export const BOUNCE_TILT_DEG = 2;
+
 export interface FracturePlan {
   /** 0 = do not fracture (too_light). Target piece budget for cleave recursion. */
   fragmentCount: number;
   /** Lateral split impulse along the cleave-plane normal (not radial burst). */
   impulse: number;
   /**
-   * World-space half-gap along the cleave normal — pieces nudge apart and
-   * stay mostly wedged on the stump (screen.toys-style), not a physics dump.
+   * Face-to-face gap as a fraction of log diameter (H5 multiplies by measured diameter).
+   * Each half slides about half of this along pushDir.
    */
   wedgeGap: number;
+  /** Bounce pop height in metres. */
+  popHeight: number;
+  /** Scripted bounce duration (ms). */
+  bounceMs: number;
   /** Impact seed concentration radius (local units; used by Voronoi fallback). */
   impactRadius: number;
   /** Whether to leave a shallow nick instead of fracturing. */
@@ -89,6 +114,8 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
       fragmentCount: 0,
       impulse: 0,
       wedgeGap: 0,
+      popHeight: 0,
+      bounceMs: BOUNCE_DURATION_MS,
       impactRadius: 0.12,
       nickOnly: true,
       messy: false,
@@ -102,6 +129,7 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
   const messy = outcome === 'too_heavy';
   let fragmentCount: number;
   if (!messy) {
+    // Prefer exactly two halves on a successful planar cleave.
     fragmentCount = SWEET_PIECES;
   } else {
     // Reference: even heavy/multi chops stay as upright wedges in a cluster —
@@ -111,17 +139,22 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
     fragmentCount = clampInt(base, generation > 0 ? MIN_RECHOP : 2, Math.min(cap, 3));
   }
 
-  // Tiny lateral nudge — ~8–14% of log diameter total crack (screen.toys feel).
+  // Tiny lateral nudge for any residual impulse bookkeeping (bodies stay static while bouncing).
   const impulse =
     outcome === 'too_heavy' ? 0.06 + weight * 0.04 : 0.04 + weight * 0.02;
-  const wedgeGap =
-    outcome === 'too_heavy' ? 0.038 + weight * 0.012 : 0.028 + weight * 0.01;
+
+  // Face gap ≈ half a diameter on first chop; later chops open a bit less.
+  const gapFrac =
+    FACE_GAP_DIAMETER_FRAC *
+    (outcome === 'too_heavy' ? 1.08 : 1) *
+    (generation > 0 ? 0.75 : 1);
 
   return {
     fragmentCount,
     impulse: impulse * (generation > 0 ? 0.65 : 1),
-    // Later chops open even less so the cluster stays tight on the stump.
-    wedgeGap: wedgeGap * (generation > 0 ? 0.55 : 1),
+    wedgeGap: gapFrac,
+    popHeight: BOUNCE_POP_HEIGHT * (generation > 0 ? 0.7 : 1),
+    bounceMs: BOUNCE_DURATION_MS,
     impactRadius: outcome === 'too_heavy' ? 0.24 : 0.18,
     nickOnly: false,
     messy,
@@ -137,6 +170,30 @@ export const MAX_RECHOP_GENERATION = 5;
 export function isRechopWorthy(bboxDiagonal: number, generation: number): boolean {
   if (generation >= MAX_RECHOP_GENERATION) return false;
   return bboxDiagonal >= MIN_RECHOP_DIAGONAL;
+}
+
+/**
+ * Reference firewood gate: too-small or bad aspect → physics pile throw.
+ * Main upright halves stay on the stump with scripted bounce.
+ */
+export function isFirewoodChip(sizeX: number, sizeY: number, sizeZ: number): boolean {
+  const diag = Math.hypot(sizeX, sizeY, sizeZ);
+  if (diag < MIN_RECHOP_DIAGONAL * 0.85) return true;
+  const horiz = Math.hypot(sizeX, sizeZ);
+  const aspect = sizeY / Math.max(1e-6, horiz);
+  // Pancake flakes or needle shards leave the stump.
+  if (aspect < 0.32 || aspect > 3.6) return true;
+  if (horiz < 0.14) return true;
+  return false;
+}
+
+/**
+ * Per-side slide distance so both halves create `gapFrac * diameter` face gap.
+ */
+export function lateralOffsetFromDiameter(diameter: number, gapFrac: number): number {
+  const d = Math.max(0.05, diameter);
+  const frac = Math.max(0, gapFrac);
+  return (frac * d) / 2;
 }
 
 function clampInt(n: number, lo: number, hi: number): number {
