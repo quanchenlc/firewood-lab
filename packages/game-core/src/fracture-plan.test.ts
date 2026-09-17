@@ -13,7 +13,12 @@ import {
   FIREWOOD_ASPECT_RESCUE,
   FIREWOOD_VOL_ABS_MIN,
   FIREWOOD_VOL_MAX,
+  INCH,
   MIN_SPLIT_THICKNESS_IN,
+  RING_PILE_ARC_SPAN,
+  RING_PILE_RADIUS,
+  RING_PILE_START_ANGLE,
+  RING_PILE_TIER_DEPTH,
   TIP_DROP_ANGLE_DEG,
   TIP_DROP_ARC_HEIGHT,
   TIP_DROP_DURATION_MS,
@@ -31,6 +36,7 @@ import {
   lateralOffsetFromDiameter,
   normalizePushXZ,
   planFracture,
+  planRingPileSlots,
   sampleTipDropPose,
   shouldTossOnTooThin,
   thicknessInchesAlong,
@@ -383,5 +389,61 @@ describe('tipDropRestPose / sampleTipDropPose', () => {
     assert.ok(TIP_DROP_ANGLE_DEG >= 60 && TIP_DROP_ANGLE_DEG <= 95);
     assert.ok(TIP_DROP_REST_RADIAL >= 0.55 && TIP_DROP_REST_RADIAL <= 0.85);
     assert.ok(TIP_DROP_SCATTER_RADIAL > TIP_DROP_REST_RADIAL);
+  });
+});
+
+describe('planRingPileSlots (reference FirewoodPile arc)', () => {
+  it('matches reference radius / arc constants (60×ld, 320°, 230°)', () => {
+    assert.ok(Math.abs(RING_PILE_RADIUS - 60 * INCH) < 1e-12);
+    assert.ok(Math.abs(RING_PILE_START_ANGLE - (320 * Math.PI) / 180) < 1e-12);
+    assert.ok(Math.abs(RING_PILE_ARC_SPAN - (230 * Math.PI) / 180) < 1e-12);
+    assert.ok(Math.abs(RING_PILE_TIER_DEPTH - 18 * INCH) < 1e-12);
+  });
+
+  it('places a neat annular band clear of the stump top', () => {
+    const halves = Array.from({ length: 10 }, () => 0.05);
+    const rnds = Array.from({ length: 20 }, () => 0.5);
+    const slots = planRingPileSlots(10, { halfHeights: halves, halfWidths: halves, rnds });
+    assert.equal(slots.length, 10);
+
+    const stumpR = 0.32;
+    const radii = slots.map((s) => Math.hypot(s.x, s.z));
+    const minR = Math.min(...radii);
+    const maxR = Math.max(...radii);
+    assert.ok(minR > stumpR + 0.5, `ring must clear stump, minR=${minR}`);
+    // Tight annular band (not a messy scatter).
+    assert.ok(maxR - minR < 0.15, `expected neat band, spread=${maxR - minR}`);
+
+    // Packed along arc — consecutive angular gaps roughly match piece width / R.
+    const angs = slots.map((s) => s.yaw);
+    for (let i = 1; i < angs.length; i++) {
+      const gap = angs[i]! - angs[i - 1]!;
+      assert.ok(gap > 0.04 && gap < 0.12, `packed gap=${gap}`);
+    }
+
+    // No piece on stump top (y is ground-level half-thickness).
+    for (const s of slots) {
+      assert.ok(s.y < 0.2, `y=${s.y} looks like stump height`);
+      assert.ok(s.y > 0.04);
+      assert.equal(s.tier, 0);
+    }
+  });
+
+  it('overflow spills to outer tier (larger radius)', () => {
+    // Narrow arc + wide pieces → forces a second tier quickly.
+    const n = 8;
+    const slots = planRingPileSlots(n, {
+      arcSpan: 0.6,
+      halfHeights: Array.from({ length: n }, () => 0.06),
+      halfWidths: Array.from({ length: n }, () => 0.08),
+      rnds: Array.from({ length: n * 2 }, () => 0.5),
+    });
+    const tier0 = slots.filter((s) => s.tier === 0);
+    const tier1 = slots.filter((s) => s.tier === 1);
+    assert.ok(tier0.length >= 1);
+    assert.ok(tier1.length >= 1, 'expected overflow to outer tier');
+    const r0 = Math.hypot(tier0[0]!.x, tier0[0]!.z);
+    const r1 = Math.hypot(tier1[0]!.x, tier1[0]!.z);
+    assert.ok(r1 > r0 + RING_PILE_TIER_DEPTH * 0.5);
   });
 });

@@ -91,6 +91,143 @@ export const TIP_DROP_GROUND_PAD = 0.02;
 /** Reserved soft-physics window after tip (ms). Currently settle stays STATIC. */
 export const TIP_DROP_POST_SETTLE_MS = 200;
 
+/**
+ * Ring firewood pile after a full stump is chopped
+ * (screen.toys FirewoodPile — logic only).
+ *
+ *   radius          = 60 * ld ≈ 1.524 m
+ *   startAngle      = 320°
+ *   arcSpan         = 230°  (crescent → reads as annular pile around stump)
+ *   tierDepthSpacing = 18 * ld ≈ 0.457 m
+ *   slot width XC   = 5 * ld
+ *   ground pad      ≈ half-thickness + small lift (no pieces on stump top)
+ */
+export const RING_PILE_RADIUS = 60 * INCH;
+export const RING_PILE_START_ANGLE = (320 * Math.PI) / 180;
+export const RING_PILE_ARC_SPAN = (230 * Math.PI) / 180;
+export const RING_PILE_TIER_DEPTH = 18 * INCH;
+export const RING_PILE_SLOT_WIDTH = 5 * INCH;
+/** Extra radial jitter (±) so the ring isn't a perfect bead necklace. */
+export const RING_PILE_RADIAL_JIT = 2 * INCH;
+/** Max pieces per arc tier before spilling to next outer tier. */
+export const RING_PILE_MAX_PER_TIER = 14;
+/** Ground clearance pad above half-thickness (metres). */
+export const RING_PILE_GROUND_PAD = 0.015;
+/** Soft roll jitter (±radians) while lying in the pile. */
+export const RING_PILE_ROLL_JIT = 0.12;
+/** Recycle slide duration (ms). */
+export const RING_PILE_RECYCLE_MS = 520;
+export const RING_PILE_RECYCLE_JIT_MS = 180;
+/** Stagger between piece starts (ms). */
+export const RING_PILE_STAGGER_MS = 35;
+
+export interface RingPileSlot {
+  /** World XZ on the annular pile. */
+  x: number;
+  y: number;
+  z: number;
+  /** Yaw of the radial outward axis (atan2(z,x)). */
+  yaw: number;
+  /** Tier index (0 = innermost arc). */
+  tier: number;
+  /** Roll about the radial axis (radians). */
+  roll: number;
+  /**
+   * Orientation basis matching reference `_simToWorld` (piece lying on side):
+   * column0 / column1 / column2 as XYZ unit axes of the local frame.
+   */
+  axisX: readonly [number, number, number];
+  axisY: readonly [number, number, number];
+  axisZ: readonly [number, number, number];
+}
+
+/**
+ * Plan neat annular slots for finished firewood around the stump.
+ * Packs pieces tightly along the reference arc by half-width (not sparse even
+ * angular spacing); overflow → outer tier (larger radius).
+ * Never places inside the stump footprint (radius ≫ stump ~0.32).
+ */
+export function planRingPileSlots(
+  count: number,
+  opts?: {
+    radius?: number;
+    startAngle?: number;
+    arcSpan?: number;
+    tierDepth?: number;
+    maxPerTier?: number;
+    groundYBase?: number;
+    /** Per-piece half-thickness (metres) for ground Y; defaults to 0.05. */
+    halfHeights?: number[];
+    /** Approximate half-width along the arc (metres); defaults to halfHeights. */
+    halfWidths?: number[];
+    /** Injected [0,1) samples for jitter (length ≥ count*2 preferred). */
+    rnds?: number[];
+  },
+): RingPileSlot[] {
+  const n = Math.max(0, Math.floor(count));
+  if (n === 0) return [];
+  const baseR = opts?.radius ?? RING_PILE_RADIUS;
+  const start = opts?.startAngle ?? RING_PILE_START_ANGLE;
+  const span = opts?.arcSpan ?? RING_PILE_ARC_SPAN;
+  const tierDepth = opts?.tierDepth ?? RING_PILE_TIER_DEPTH;
+  const groundBase = opts?.groundYBase ?? 0;
+  const slots: RingPileSlot[] = [];
+
+  // Greedy pack along arc by width — reference slot grid keeps chips touching.
+  let tier = 0;
+  let cursor = 0; // arc-length along current tier
+
+  for (let i = 0; i < n; i++) {
+    const halfH = opts?.halfHeights?.[i] ?? 0.05;
+    const halfW = Math.max(0.04, opts?.halfWidths?.[i] ?? halfH * 1.15);
+    const step = halfW * 2 * 1.08; // slight contact gap
+    const rad = baseR + tier * tierDepth;
+    const maxArc = span * rad;
+
+    if (cursor + step > maxArc && cursor > 0) {
+      tier += 1;
+      cursor = 0;
+    }
+
+    const rndA = opts?.rnds?.[i * 2] ?? 0.5;
+    const rndB = opts?.rnds?.[i * 2 + 1] ?? 0.5;
+    const radJit = (rndA - 0.5) * 2 * RING_PILE_RADIAL_JIT;
+    const r = baseR + tier * tierDepth + radJit;
+    const ang = start + (cursor + halfW) / Math.max(1e-6, r);
+    cursor += step;
+
+    const ox = Math.cos(ang);
+    const oz = Math.sin(ang);
+    // Mild stacking: every 3rd chip rides slightly on neighbors.
+    const stackLift = (i % 3 === 2 ? halfH * 0.9 : 0) + tier * 0.02;
+    const y = groundBase + halfH + RING_PILE_GROUND_PAD + stackLift;
+    const roll = (rndB - 0.5) * 2 * RING_PILE_ROLL_JIT;
+
+    const ux = ox;
+    const uz = oz;
+    const tx = uz;
+    const tz = -ux;
+    const c = Math.cos(roll);
+    const s = Math.sin(roll);
+    const axisX: [number, number, number] = [tx * c, s, tz * c];
+    const axisY: [number, number, number] = [ux, 0, uz];
+    const axisZ: [number, number, number] = [-tx * s, c, -tz * s];
+
+    slots.push({
+      x: ox * r,
+      y,
+      z: oz * r,
+      yaw: ang,
+      tier,
+      roll,
+      axisX,
+      axisY,
+      axisZ,
+    });
+  }
+  return slots;
+}
+
 export interface FracturePlan {
   /** 0 = do not fracture (too_light). Target piece budget for cleave recursion. */
   fragmentCount: number;
