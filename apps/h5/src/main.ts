@@ -674,6 +674,7 @@ async function boot(): Promise<void> {
     },
     doChop: () => doChop(),
     reset: () => resetRound(),
+    getRoundDims: () => logScene.getRoundDims(),
     aimAt: (x: number, y: number) => aimAt(x, y),
     getLockedCleave: () =>
       lockedCleaveNormal

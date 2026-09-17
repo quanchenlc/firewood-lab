@@ -17,9 +17,10 @@ import { createFractureWorld, type FractureWorld, type PhysFragment } from './fr
 import {
   CAM_LOOK_AT_Y,
   CAM_RADIUS,
-  LOG_HEIGHT,
-  LOG_RADIUS_BOT,
-  LOG_RADIUS_TOP,
+  applyBarkIrregularity,
+  camLookAtY,
+  sampleLogRound,
+  type LogRoundDims,
   STUMP_BOT_RADIUS,
 } from './log-dimensions';
 
@@ -64,6 +65,8 @@ export interface LogScene {
     handleDotUp: number;
   };
   resetLog(opts?: { keepPile?: boolean }): void;
+  /** Current upright-round dims (metres + bark seed). */
+  getRoundDims(): LogRoundDims;
   setSpecies(species: Species): Promise<void>;
   setAxeVisual(root: THREE.Object3D | null): void;
   playAxeSwing(aimPoint: THREE.Vector3, opts?: { rebound?: boolean }): void;
@@ -79,11 +82,14 @@ export interface LogScene {
  * Fracture proxy: low-poly cylinder (Voronoi/slice-friendly).
  * Rest pose is upright — cut face up, axis near world +Y (like screen.toys/firewood).
  * Visual stump is a separate dense GLB underneath — too heavy to fracture directly (~33k verts).
- * Dimensions: see `log-dimensions.ts` (scaled to firewood volume gates).
+ * Dimensions: see `log-dimensions.ts` — resampled each round (height / radius / bark).
  */
-function buildLogGeometry(): THREE.BufferGeometry {
+function buildLogGeometry(dims: LogRoundDims): THREE.BufferGeometry {
   // CylinderGeometry default: axis = +Y, caps on top/bottom (end-grain).
-  return new THREE.CylinderGeometry(LOG_RADIUS_TOP, LOG_RADIUS_BOT, LOG_HEIGHT, 20, 3);
+  // 24×4 gives bark noise enough rings without bloating fracture cost.
+  const geo = new THREE.CylinderGeometry(dims.radiusTop, dims.radiusBot, dims.height, 24, 4);
+  applyBarkIrregularity(geo, dims);
+  return geo;
 }
 
 /**
@@ -258,6 +264,8 @@ export function createLogScene(
   let azimuthVelocity = 0;
   const lookAt = new THREE.Vector3(0, CAM_LOOK_AT_Y, 0);
   const camRadius = CAM_RADIUS;
+  /** Current upright round — resampled on each reset / species rebuild. */
+  let roundDims: LogRoundDims = sampleLogRound();
 
   // Bright hemisphere: warm sky + greenish ground bounce.
   scene.add(new THREE.HemisphereLight(0xfff8ee, 0x7f9a62, weak ? 1.45 : 1.75));
@@ -318,7 +326,8 @@ export function createLogScene(
   scene.add(stump);
   stump.updateMatrixWorld(true);
   const stumpTopY = planted.topY;
-  const logCenterY = stumpTopY + LOG_HEIGHT * 0.5 + 0.002;
+  let logCenterY = stumpTopY + roundDims.height * 0.5 + 0.002;
+  lookAt.y = camLookAtY(roundDims, stumpTopY);
 
   // Thin packed-earth ring under the stump only (not a dirt hill the log sits on).
   const pad = new THREE.Mesh(
@@ -334,7 +343,7 @@ export function createLogScene(
   scene.add(pad);
 
   let mats: SpeciesMaterials | null = null;
-  let logMesh = createLogProxy();
+  let logMesh = createLogProxy(false);
   scene.add(logMesh);
 
   // First-person axe: hidden at rest; appears only during the vertical swing.
@@ -409,7 +418,10 @@ export function createLogScene(
   let punch = 0;
   let nickT = -1;
 
-  function createLogProxy(): DestructibleMesh {
+  function createLogProxy(resample = false): DestructibleMesh {
+    if (resample) roundDims = sampleLogRound();
+    logCenterY = stumpTopY + roundDims.height * 0.5 + 0.002;
+    lookAt.y = camLookAtY(roundDims, stumpTopY);
     const outer = mats?.outer ?? [
       new THREE.MeshStandardMaterial({ color: 0x8b5a2b, roughness: 0.85 }),
       new THREE.MeshStandardMaterial({ color: 0xd4b896, roughness: 0.9 }),
@@ -422,11 +434,12 @@ export function createLogScene(
         roughness: 0.9,
         side: THREE.DoubleSide,
       });
-    const mesh = new DestructibleMesh(buildLogGeometry(), outer[0]!, inner);
+    const mesh = new DestructibleMesh(buildLogGeometry(roundDims), outer[0]!, inner);
     mesh.material = outer;
     mesh.position.set(0, logCenterY, 0);
     mesh.userData.role = 'log';
     mesh.userData.generation = 0;
+    mesh.userData.logDims = { ...roundDims };
     return mesh;
   }
 
@@ -540,7 +553,7 @@ export function createLogScene(
       if (logMesh.visible && logMesh.parent && !findFragment(logMesh)) {
         return {
           mesh: logMesh,
-          point: new THREE.Vector3(0, logCenterY + LOG_HEIGHT * 0.15, 0),
+          point: new THREE.Vector3(0, logCenterY + roundDims.height * 0.15, 0),
           generation: 0,
         };
       }
@@ -573,7 +586,7 @@ export function createLogScene(
     clearMarker();
     if (logMesh.parent) logMesh.removeFromParent();
     fracture.disposeMesh(logMesh);
-    logMesh = createLogProxy();
+    logMesh = createLogProxy(true);
     scene.add(logMesh);
   }
 
@@ -586,7 +599,7 @@ export function createLogScene(
     if (logMesh.visible && logMesh.parent && logMesh.userData.role === 'log') {
       if (logMesh.parent) logMesh.removeFromParent();
       fracture.disposeMesh(logMesh);
-      logMesh = createLogProxy();
+      logMesh = createLogProxy(false);
       scene.add(logMesh);
     }
   }
@@ -838,6 +851,7 @@ export function createLogScene(
     playNick,
     fractureAt,
     resetLog,
+    getRoundDims: () => ({ ...roundDims }),
     setSpecies,
     setAxeVisual,
     playAxeSwing,
@@ -852,7 +866,7 @@ export function createLogScene(
       return lastCleaveNormal;
     },
     debugFreezeAxeImpact() {
-      const aim = new THREE.Vector3(0, logCenterY + LOG_HEIGHT * 0.2, 0);
+      const aim = new THREE.Vector3(0, logCenterY + roundDims.height * 0.2, 0);
       playAxeSwing(aim, { rebound: false });
       axeSwingT = 0.25;
       axeFrozen = true;
