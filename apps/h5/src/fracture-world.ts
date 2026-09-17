@@ -589,9 +589,10 @@ export function createFractureWorld(): FractureWorld {
           (Math.random() - 0.5) * 4,
         );
       } else {
-        // Start closed at base; first animator tick slides toward final.
-        body.position.set(baseX, baseY, baseZ);
-        fragment.position.set(baseX, baseY, baseZ);
+        // Apply the designed lateral 错开 immediately so the gap is correct even
+        // if animation frames are skipped; bounce still plays closed→open + pop.
+        body.position.set(finalX, baseY, finalZ);
+        fragment.position.set(finalX, baseY, finalZ);
       }
 
       world.addBody(body);

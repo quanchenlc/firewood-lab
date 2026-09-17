@@ -520,39 +520,26 @@ async function boot(): Promise<void> {
     /** Stump-piece horizontal centers + pairwise gap (for bounce/offset checks). */
     stumpGap: () => {
       const stump = logScene.fracture.fragments.filter((f) => f.onStump && f.mesh.visible);
+      const debug = logScene.fracture.lastCleaveDebug;
+      const approxDiameter = debug?.diameter ?? 0.8;
       const boxes = stump.map((f) => {
         const box = new THREE.Box3().setFromObject(f.mesh);
         const c = box.getCenter(new THREE.Vector3());
         const s = box.getSize(new THREE.Vector3());
-        return {
-          x: c.x,
-          y: c.y,
-          z: c.z,
-          bouncing: !!f.bounce,
-          minX: box.min.x,
-          maxX: box.max.x,
-          minZ: box.min.z,
-          maxZ: box.max.z,
-          sizeX: s.x,
-          sizeZ: s.z,
-        };
+        return { x: c.x, y: c.y, z: c.z, bouncing: !!f.bounce, sizeX: s.x, sizeZ: s.z };
       });
       let maxGap = 0;
-      let faceGap = 0;
       for (let i = 0; i < boxes.length; i++) {
         for (let j = i + 1; j < boxes.length; j++) {
-          const a = boxes[i]!;
-          const b = boxes[j]!;
-          const d = Math.hypot(a.x - b.x, a.z - b.z);
+          const d = Math.hypot(boxes[i]!.x - boxes[j]!.x, boxes[i]!.z - boxes[j]!.z);
           if (d > maxGap) maxGap = d;
-          const sepX = a.maxX < b.minX ? b.minX - a.maxX : b.maxX < a.minX ? a.minX - b.maxX : 0;
-          const sepZ = a.maxZ < b.minZ ? b.minZ - a.maxZ : b.maxZ < a.minZ ? a.minZ - b.maxZ : 0;
-          const faces = Math.max(sepX, sepZ);
-          if (faces > faceGap) faceGap = faces;
         }
       }
-      const debug = logScene.fracture.lastCleaveDebug;
-      const approxDiameter = debug?.diameter ?? 0.8;
+      // Half-disk centroid sits 4R/(3π) from the flat face; recover face gap from centers.
+      const R = approxDiameter * 0.5;
+      const centroidFromFace = (4 * R) / (3 * Math.PI);
+      const faceGap =
+        boxes.length >= 2 ? Math.max(0, maxGap - 2 * centroidFromFace) : 0;
       return {
         count: stump.length,
         centers: boxes,
