@@ -154,10 +154,11 @@ export function createLogScene(
   const stump = stumpModel;
   stump.position.set(0, 0.26, 0);
   scene.add(stump);
-
-  // Sit choppable round on stump top (~0.53 after normalize + lift).
-  const stumpTopY = 0.53;
-  const logCenterY = stumpTopY + LOG_HEIGHT * 0.5 + 0.02;
+  stump.updateMatrixWorld(true);
+  // Sit the round on the measured stump crown (not a guessed constant — that caused hover).
+  const stumpBox = new THREE.Box3().setFromObject(stump);
+  const stumpTopY = stumpBox.max.y - 0.01;
+  const logCenterY = stumpTopY + LOG_HEIGHT * 0.5 + 0.01;
 
   let mats: SpeciesMaterials | null = null;
   let logMesh = createLogProxy();
@@ -220,7 +221,8 @@ export function createLogScene(
   nickMark.visible = false;
   scene.add(nickMark);
 
-  const fracture = createFractureWorld();
+  const fracture = createFractureWorld({ stumpSupportY: stumpTopY });
+  fracture.setStumpSupportY(stumpTopY);
   let shake = 0;
   let punch = 0;
   let nickT = -1;

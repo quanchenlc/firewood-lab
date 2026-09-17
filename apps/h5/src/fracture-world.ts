@@ -8,7 +8,6 @@ import {
   INCH,
   isFirewoodChip,
   isRechopWorthy,
-  lateralOffsetFromDiameter,
   MAX_LIVE_FRAGMENTS,
   MIN_RECHOP_DIAGONAL,
   TINY_CHIP_DIAGONAL,
@@ -65,6 +64,8 @@ export interface FractureWorld {
     sideOffset: number;
     pieceCount: number;
   } | null;
+  /** Align wedged settle height to the visual stump top. */
+  setStumpSupportY(y: number): void;
   sync(): void;
   /** Fixed-step physics; returns whether a step ran. */
   step(dt: number, weakDevice: boolean): void;
@@ -98,7 +99,7 @@ function smoothstep(u: number): number {
   return t * t * (3 - 2 * t);
 }
 
-export function createFractureWorld(): FractureWorld {
+export function createFractureWorld(opts?: { stumpSupportY?: number }): FractureWorld {
   const world = new CANNON.World({
     gravity: new CANNON.Vec3(0, -11.5, 0),
   });
@@ -153,8 +154,8 @@ export function createFractureWorld(): FractureWorld {
   // three-pinata leaves normalizationScaleFactor at 1 → UV already ~[0,1];
   // keep scale near 1 so face-grain doesn't micro-tile into a moiré.
   sliceOpts.textureScale.set(1, 1);
-  /** World Y of the chopping-block top — match log-scene stumpTopY (0.53). */
-  const STUMP_SUPPORT_Y = 0.53;
+  /** World Y of the chopping-block top — measured from the visual stump mesh. */
+  let stumpSupportY = opts?.stumpSupportY ?? 0.45;
   const _tiltQ = new THREE.Quaternion();
   const _yawQ = new THREE.Quaternion();
   const _outQ = new THREE.Quaternion();
@@ -163,6 +164,14 @@ export function createFractureWorld(): FractureWorld {
   function bboxDiagonal(mesh: THREE.Mesh): number {
     const box = new THREE.Box3().setFromObject(mesh);
     return box.getSize(new THREE.Vector3()).length();
+  }
+
+  /** Per-side slide so both halves open `gapFrac * diameter` face gap. */
+  function sideOffsetFromPlan(diameter: number, gapFrac: number): number {
+    // Inline (avoid any stale import binding): (frac * d) / 2
+    const d = Math.max(0.05, diameter);
+    const frac = Math.max(0, gapFrac);
+    return (frac * d) / 2;
   }
 
   function makeBodyFromMesh(mesh: THREE.Mesh, massScale: number, onStump: boolean): CANNON.Body {
@@ -316,27 +325,31 @@ export function createFractureWorld(): FractureWorld {
     }
 
     // Hollow / sparse cut face: synthesize a rectangular seal cap.
-    if (cutTriCount < 8) {
+    // Always add a thin seal so triangulation holes never read as black voids.
+    {
       mesh.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(mesh);
       const size = box.getSize(new THREE.Vector3());
       const center = box.getCenter(new THREE.Vector3());
-      // Cap sits on the flat side of the half (toward cleave plane / impact).
       const width = Math.max(size.x, size.z) * 0.98;
       const height = Math.max(0.2, size.y * 0.98);
       const capGeo = new THREE.PlaneGeometry(width, height, 1, 1);
-      // PlaneGeometry faces +Z; rotate so +Z aligns with planeNormal.
-      const quat = new THREE.Quaternion().setFromUnitVectors(
-        new THREE.Vector3(0, 0, 1),
-        n,
-      );
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      const innerMat = (mats[1] ?? mats[0]) as THREE.Material;
-      const cap = new THREE.Mesh(capGeo, innerMat);
+      const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+      const matsArr = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const innerMat = (matsArr[1] ?? matsArr[0]) as THREE.Material;
+      // Prefer a dedicated double-sided clone so caps stay opaque.
+      const capMat =
+        innerMat && 'clone' in innerMat
+          ? (innerMat.clone() as THREE.MeshStandardMaterial)
+          : new THREE.MeshStandardMaterial({
+              color: 0xc4a574,
+              roughness: 0.88,
+              side: THREE.DoubleSide,
+            });
+      if ('side' in capMat) capMat.side = THREE.DoubleSide;
+      const cap = new THREE.Mesh(capGeo, capMat);
       cap.quaternion.copy(quat);
-      // Place cap on the flat side of the half (bbox face along ±n toward origin).
-      const extent =
-        Math.abs(n.x) * size.x * 0.5 + Math.abs(n.z) * size.z * 0.5;
+      const extent = Math.abs(n.x) * size.x * 0.5 + Math.abs(n.z) * size.z * 0.5;
       const toOrigin = new THREE.Vector3(-center.x, 0, -center.z);
       const sideSign = Math.sign(toOrigin.dot(n)) || 1;
       const worldCapPos = center.clone().addScaledVector(n, sideSign * extent * 0.92);
@@ -344,8 +357,15 @@ export function createFractureWorld(): FractureWorld {
       cap.position.copy(worldCapPos);
       cap.userData.role = 'cutCap';
       cap.renderOrder = 1;
+      // Remove prior seal if re-chopping.
+      for (const child of [...mesh.children]) {
+        if (child.userData?.role === 'cutCap') {
+          mesh.remove(child);
+          const cg = (child as THREE.Mesh).geometry;
+          cg?.dispose();
+        }
+      }
       mesh.add(cap);
-      // Also mark geometry so later chops still have a cut group hint.
       if (!cutGroup) {
         geo.addGroup(index.count, 0, 1);
       }
@@ -614,7 +634,7 @@ export function createFractureWorld(): FractureWorld {
     const now = performance.now();
     const settleMs = plan.bounceMs + 40;
     // plan.wedgeGap is face-gap fraction of diameter; each half slides half of that.
-    const sideOffset = lateralOffsetFromDiameter(logDiameter, plan.wedgeGap);
+    const sideOffset = sideOffsetFromPlan(logDiameter, plan.wedgeGap);
     lastCleaveDebug = {
       diameter: logDiameter,
       gapFrac: plan.wedgeGap,
@@ -667,7 +687,7 @@ export function createFractureWorld(): FractureWorld {
         // Snap bottoms onto the stump top so halves sit on the block.
         fragment.updateMatrixWorld(true);
         const box = new THREE.Box3().setFromObject(fragment);
-        const settleY = STUMP_SUPPORT_Y - box.min.y;
+        const settleY = stumpSupportY - box.min.y;
         body.position.y += settleY;
         fragment.position.y = body.position.y;
       }
@@ -863,6 +883,9 @@ export function createFractureWorld(): FractureWorld {
     fragments,
     get lastCleaveDebug() {
       return lastCleaveDebug;
+    },
+    setStumpSupportY(y: number) {
+      stumpSupportY = y;
     },
     sync,
     step,
