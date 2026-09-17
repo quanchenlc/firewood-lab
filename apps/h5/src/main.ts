@@ -752,6 +752,8 @@ async function boot(): Promise<void> {
         return {
           onStump: f.onStump,
           splittable: f.splittable,
+          tipDrop: !!f.tipDrop,
+          bounce: !!f.bounce,
           x: +x.toFixed(3),
           y: +y.toFixed(3),
           z: +z.toFixed(3),

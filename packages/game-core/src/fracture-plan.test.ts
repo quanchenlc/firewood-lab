@@ -14,6 +14,12 @@ import {
   FIREWOOD_VOL_ABS_MIN,
   FIREWOOD_VOL_MAX,
   MIN_SPLIT_THICKNESS_IN,
+  TIP_DROP_ANGLE_DEG,
+  TIP_DROP_ARC_HEIGHT,
+  TIP_DROP_DURATION_MS,
+  TIP_DROP_REST_RADIAL,
+  TIP_DROP_REST_RADIAL_JIT,
+  TIP_DROP_SCATTER_RADIAL,
   azimuthNudgeVelocity,
   horizontalAspectFromSize,
   horizontalAspectXZ,
@@ -23,9 +29,12 @@ import {
   isRechopWorthy,
   isTooThinToSplit,
   lateralOffsetFromDiameter,
+  normalizePushXZ,
   planFracture,
+  sampleTipDropPose,
   shouldTossOnTooThin,
   thicknessInchesAlong,
+  tipDropRestPose,
   volumeInchesFromBBox,
 } from './fracture-plan.ts';
 
@@ -294,5 +303,85 @@ describe('option A decideTooThinChop', () => {
       shouldTossOnTooThin({ otherDirTooThin: false, alreadyFirewood: false }),
       false,
     );
+  });
+});
+
+describe('tipDropRestPose / sampleTipDropPose', () => {
+  it('rest radial stays beside stump (≥0.42) and never pulls inward', () => {
+    const rest = tipDropRestPose({
+      fromX: 0.12,
+      fromZ: 0,
+      dirX: 1,
+      dirZ: 0,
+      restHalfHeight: 0.06,
+      restRadial: TIP_DROP_REST_RADIAL,
+      restRadialJit: TIP_DROP_REST_RADIAL_JIT,
+      rnd: 0,
+    });
+    assert.ok(rest.restRadial >= TIP_DROP_REST_RADIAL);
+    assert.ok(rest.toX >= 0.42);
+    assert.ok(Math.abs(rest.toZ) < 1e-9);
+    assert.ok(rest.toY >= 0.04);
+  });
+
+  it('sample is continuous from→to with outward tip and soft mid arc', () => {
+    const start = sampleTipDropPose({
+      u: 0,
+      fromX: 0.1,
+      fromY: 0.5,
+      fromZ: 0,
+      toX: 0.6,
+      toY: 0.08,
+      toZ: 0,
+      tipRad: Math.PI / 2,
+      arcHeight: TIP_DROP_ARC_HEIGHT,
+    });
+    assert.ok(Math.abs(start.x - 0.1) < 1e-9);
+    assert.ok(Math.abs(start.tipRad) < 1e-9);
+
+    const mid = sampleTipDropPose({
+      u: 0.5,
+      fromX: 0.1,
+      fromY: 0.5,
+      fromZ: 0,
+      toX: 0.6,
+      toY: 0.08,
+      toZ: 0,
+      tipRad: Math.PI / 2,
+      arcHeight: TIP_DROP_ARC_HEIGHT,
+    });
+    assert.ok(mid.x > 0.1 && mid.x < 0.6);
+    assert.ok(mid.tipRad > 0 && mid.tipRad < Math.PI / 2);
+    // Soft arc lifts mid Y above the pure lerp.
+    const lerpY = 0.5 + (0.08 - 0.5) * mid.ease;
+    assert.ok(mid.y > lerpY);
+
+    const end = sampleTipDropPose({
+      u: 1,
+      fromX: 0.1,
+      fromY: 0.5,
+      fromZ: 0,
+      toX: 0.6,
+      toY: 0.08,
+      toZ: 0,
+      tipRad: Math.PI / 2,
+      arcHeight: TIP_DROP_ARC_HEIGHT,
+    });
+    assert.ok(Math.abs(end.x - 0.6) < 1e-9);
+    assert.ok(Math.abs(end.y - 0.08) < 1e-9);
+    assert.ok(Math.abs(end.tipRad - Math.PI / 2) < 1e-9);
+  });
+
+  it('normalizePushXZ falls back when degenerate', () => {
+    const n = normalizePushXZ(0, 0, 0);
+    assert.ok(Math.abs(n.ox - 1) < 1e-9);
+    assert.ok(Math.abs(n.oz) < 1e-9);
+  });
+
+  it('tip-drop duration/angle constants stay in a natural short-settle band', () => {
+    assert.ok(TIP_DROP_DURATION_MS >= 280 && TIP_DROP_DURATION_MS <= 420);
+    assert.ok(TIP_DROP_ANGLE_DEG >= 60 && TIP_DROP_ANGLE_DEG <= 95);
+    assert.ok(TIP_DROP_REST_RADIAL >= 0.55 && TIP_DROP_REST_RADIAL <= 0.85);
+    assert.ok(TIP_DROP_SCATTER_RADIAL > TIP_DROP_REST_RADIAL);
   });
 });
