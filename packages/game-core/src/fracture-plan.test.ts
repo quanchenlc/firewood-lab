@@ -167,11 +167,15 @@ describe('cleaveNormalXZ', () => {
 });
 
 describe('isRechopWorthy', () => {
-  it('rejects tiny or over-generated pieces', () => {
+  it('rejects tiny pieces; keeps large-volume pieces choppable past gen cap', () => {
     assert.equal(isRechopWorthy(0.2, 0), false);
     assert.equal(isRechopWorthy(0.5, 5), false);
     assert.equal(isRechopWorthy(0.5, 2), true);
     assert.equal(isRechopWorthy(0.5, 0), true);
+    // vol > 500 → still splittable even at high generation
+    assert.equal(isRechopWorthy(0.5, 8, FIREWOOD_VOL_MAX + 10), true);
+    // rescued mid-volume also stays choppable
+    assert.equal(isRechopWorthy(0.5, 8, 400), true);
   });
 });
 

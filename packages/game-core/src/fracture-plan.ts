@@ -89,8 +89,10 @@ const MAX_FRAGMENTS = 4;
 const WEAK_CAP = 3;
 const MIN_RECHOP = 2;
 
-/** Soft cap on simultaneous physics fragments in the scene. */
-export const MAX_LIVE_FRAGMENTS = 28;
+/** Soft cap on simultaneous physics fragments in the scene.
+ * Needs headroom for stump wedges + ground pile (reference keeps tossing chips).
+ */
+export const MAX_LIVE_FRAGMENTS = 56;
 /** Despawn chips smaller than this bbox diagonal. */
 export const TINY_CHIP_DIAGONAL = 0.18;
 
@@ -222,12 +224,24 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
 
 /** Pieces smaller than this (bbox diagonal) are not re-choppable. */
 export const MIN_RECHOP_DIAGONAL = 0.28;
-/** Soft cap so multi-tap can produce several parallel upright slices. */
+/** Soft cap so multi-tap can produce several parallel upright slices.
+ * Large pieces (vol > FIREWOOD_VOL_MAX) ignore this — they stay splittable
+ * until the volume/aspect firewood gate tosses them.
+ */
 export const MAX_RECHOP_GENERATION = 5;
 
-export function isRechopWorthy(bboxDiagonal: number, generation: number): boolean {
+export function isRechopWorthy(
+  bboxDiagonal: number,
+  generation: number,
+  volumeInches?: number,
+): boolean {
+  if (bboxDiagonal < MIN_RECHOP_DIAGONAL) return false;
+  // Reference: vol > 500 stays on stump and remains splittable.
+  if (volumeInches !== undefined && volumeInches > FIREWOOD_VOL_MAX) return true;
+  // Rescued slender mid-volume pieces: allow a few more chops while thick enough.
+  if (volumeInches !== undefined && volumeInches > FIREWOOD_VOL_ABS_MIN) return true;
   if (generation >= MAX_RECHOP_GENERATION) return false;
-  return bboxDiagonal >= MIN_RECHOP_DIAGONAL;
+  return true;
 }
 
 /**
