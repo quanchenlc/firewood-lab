@@ -252,7 +252,12 @@ export async function buildChoppingBlock(
   root.add(body);
 
   const topGeo = new THREE.CircleGeometry(TOP_R * 0.995, 40);
-  applyStumpOutlineIrregularity(topGeo, { height: HEIGHT, seed: stumpSeed, ampIn: 0.28 });
+  applyStumpOutlineIrregularity(topGeo, {
+    height: HEIGHT,
+    seed: stumpSeed,
+    ampIn: 0.32,
+    plane: 'xy',
+  });
   const top = new THREE.Mesh(topGeo, cutMat);
   top.rotation.x = -Math.PI / 2;
   top.position.y = HEIGHT + 0.001;

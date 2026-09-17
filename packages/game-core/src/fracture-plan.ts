@@ -143,7 +143,8 @@ export interface RingPileSlot {
 
 /**
  * Plan neat annular slots for finished firewood around the stump.
- * Even spacing along the reference arc; overflow → outer tier (larger radius).
+ * Packs pieces tightly along the reference arc by half-width (not sparse even
+ * angular spacing); overflow → outer tier (larger radius).
  * Never places inside the stump footprint (radius ≫ stump ~0.32).
  */
 export function planRingPileSlots(
@@ -157,6 +158,8 @@ export function planRingPileSlots(
     groundYBase?: number;
     /** Per-piece half-thickness (metres) for ground Y; defaults to 0.05. */
     halfHeights?: number[];
+    /** Approximate half-width along the arc (metres); defaults to halfHeights. */
+    halfWidths?: number[];
     /** Injected [0,1) samples for jitter (length ≥ count*2 preferred). */
     rnds?: number[];
   },
@@ -167,45 +170,53 @@ export function planRingPileSlots(
   const start = opts?.startAngle ?? RING_PILE_START_ANGLE;
   const span = opts?.arcSpan ?? RING_PILE_ARC_SPAN;
   const tierDepth = opts?.tierDepth ?? RING_PILE_TIER_DEPTH;
-  const maxPer = Math.max(1, opts?.maxPerTier ?? RING_PILE_MAX_PER_TIER);
   const groundBase = opts?.groundYBase ?? 0;
   const slots: RingPileSlot[] = [];
 
+  // Greedy pack along arc by width — reference slot grid keeps chips touching.
+  let tier = 0;
+  let cursor = 0; // arc-length along current tier
+
   for (let i = 0; i < n; i++) {
-    const tier = Math.floor(i / maxPer);
-    const indexInTier = i % maxPer;
-    const tierCount = Math.min(maxPer, n - tier * maxPer);
-    // Even spacing along the arc for this tier.
-    const t = tierCount <= 1 ? 0.5 : indexInTier / (tierCount - 1);
-    const ang = start + t * span;
+    const halfH = opts?.halfHeights?.[i] ?? 0.05;
+    const halfW = Math.max(0.04, opts?.halfWidths?.[i] ?? halfH * 1.15);
+    const step = halfW * 2 * 1.08; // slight contact gap
+    const rad = baseR + tier * tierDepth;
+    const maxArc = span * rad;
+
+    if (cursor + step > maxArc && cursor > 0) {
+      tier += 1;
+      cursor = 0;
+    }
+
     const rndA = opts?.rnds?.[i * 2] ?? 0.5;
     const rndB = opts?.rnds?.[i * 2 + 1] ?? 0.5;
     const radJit = (rndA - 0.5) * 2 * RING_PILE_RADIAL_JIT;
-    const rad = baseR + tier * tierDepth + radJit;
+    const r = baseR + tier * tierDepth + radJit;
+    const ang = start + (cursor + halfW) / Math.max(1e-6, r);
+    cursor += step;
+
     const ox = Math.cos(ang);
     const oz = Math.sin(ang);
-    const halfH = opts?.halfHeights?.[i] ?? 0.05;
-    // Mild stacking within a tier: every other piece sits slightly higher.
-    const stackLift = (indexInTier % 3 === 2 ? halfH * 0.85 : 0) + tier * 0.02;
+    // Mild stacking: every 3rd chip rides slightly on neighbors.
+    const stackLift = (i % 3 === 2 ? halfH * 0.9 : 0) + tier * 0.02;
     const y = groundBase + halfH + RING_PILE_GROUND_PAD + stackLift;
     const roll = (rndB - 0.5) * 2 * RING_PILE_ROLL_JIT;
 
-    // Radial u, tangent t = up × u — reference `_simToWorld` side-lying basis.
     const ux = ox;
     const uz = oz;
-    const tx = uz; // cross((0,1,0),(ux,0,uz)) = (uz, 0, -ux)
+    const tx = uz;
     const tz = -ux;
     const c = Math.cos(roll);
     const s = Math.sin(roll);
-    // Roll about radial: tangent' / up' (Rodrigues).
     const axisX: [number, number, number] = [tx * c, s, tz * c];
     const axisY: [number, number, number] = [ux, 0, uz];
     const axisZ: [number, number, number] = [-tx * s, c, -tz * s];
 
     slots.push({
-      x: ox * rad,
+      x: ox * r,
       y,
-      z: oz * rad,
+      z: oz * r,
       yaw: ang,
       tier,
       roll,

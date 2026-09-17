@@ -1361,16 +1361,23 @@ export function createFractureWorld(
     if (n === 0) return;
 
     const halfHeights: number[] = [];
+    const halfWidths: number[] = [];
     const rnds: number[] = [];
     for (let i = 0; i < n; i++) {
       const f = live[i]!;
-      halfHeights.push(tipRestHalfHeight(f.mesh));
+      f.mesh.updateMatrixWorld(true);
+      const size = new THREE.Box3().setFromObject(f.mesh).getSize(new THREE.Vector3());
+      const sorted = [size.x, size.y, size.z].sort((a, b) => a - b);
+      halfHeights.push(Math.max(0.03, sorted[0]! * 0.45));
+      // Arc packing uses mid extent (lying length/width along tangent).
+      halfWidths.push(Math.max(0.04, sorted[1]! * 0.48));
       rnds.push(Math.random(), Math.random());
     }
     const slots = planRingPileSlots(n, {
       radius,
       groundYBase: groundY,
       halfHeights,
+      halfWidths,
       rnds,
     });
 

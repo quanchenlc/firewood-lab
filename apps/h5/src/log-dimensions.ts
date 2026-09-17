@@ -33,11 +33,11 @@ export const BARK_BOTTOM_BIAS = 0.1;
 
 /**
  * Low-frequency plan silhouette (unitless radius scale).
- * Ellipse ±~9% + 3/5-lobe bumps — overall still round, clearly not a clean circle.
+ * Ellipse ±~14% + 3/5-lobe bumps — clearly not a clean circle, still stump-like.
  */
-export const PLAN_ELLIPSE_AMP = 0.09;
-export const PLAN_LOBE3_AMP = 0.07;
-export const PLAN_LOBE5_AMP = 0.035;
+export const PLAN_ELLIPSE_AMP = 0.14;
+export const PLAN_LOBE3_AMP = 0.11;
+export const PLAN_LOBE5_AMP = 0.05;
 
 /** Mid-range defaults (stable exports for framing / tests). */
 export const LOG_HEIGHT = ((LOG_HEIGHT_IN_MIN + LOG_HEIGHT_IN_MAX) / 2) * INCH;
@@ -186,8 +186,8 @@ export function applyBarkIrregularity(
 
 /**
  * Same organic outline for the chopping-block cylinder / cut-face disk.
- * `halfHeight` is half the mesh height when geometry is Y-centered (Cylinder),
- * or pass `yBottom`/`yTop` for a disk at constant Y.
+ * - Cylinder (Y-up): radial = hypot(x,z)
+ * - CircleGeometry (XY plane, later rotated flat): radial = hypot(x,y)
  */
 export function applyStumpOutlineIrregularity(
   geo: {
@@ -201,26 +201,37 @@ export function applyStumpOutlineIrregularity(
     } | undefined;
     computeVertexNormals?: () => void;
   },
-  opts: { height: number; seed?: number; ampIn?: number },
+  opts: {
+    height: number;
+    seed?: number;
+    ampIn?: number;
+    /** 'xz' for Y-up cylinder; 'xy' for flat CircleGeometry before tilt. */
+    plane?: 'xz' | 'xy';
+  },
 ): void {
   const pos = geo.getAttribute('position');
   if (!pos) return;
   const seed = opts.seed ?? 17;
   const ampIn = opts.ampIn ?? BARK_AMP_IN * 0.85;
   const h = Math.max(1e-6, opts.height);
+  const plane = opts.plane ?? 'xz';
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const y = pos.getY(i);
     const z = pos.getZ(i);
-    const radial = Math.hypot(x, z);
+    const radial = plane === 'xy' ? Math.hypot(x, y) : Math.hypot(x, z);
     if (radial < 1e-4) continue;
-    const angle = Math.atan2(z, x);
-    // Map Y into [0,1] assuming geometry centered on Y or sitting on y=0..height.
-    const n = Math.max(0, Math.min(1, (y + h * 0.5) / h));
+    const angle = plane === 'xy' ? Math.atan2(y, x) : Math.atan2(z, x);
+    const heightFrac =
+      plane === 'xy' ? 1 : Math.max(0, Math.min(1, (y + h * 0.5) / h));
     const plan = planSilhouetteScale(angle, seed + 9);
-    const bark = radialBarkOffsetMetres(angle, n, seed, ampIn);
+    const bark = radialBarkOffsetMetres(angle, heightFrac, seed, ampIn);
     const scale = (radial * plan + bark) / radial;
-    pos.setXYZ(i, x * scale, y, z * scale);
+    if (plane === 'xy') {
+      pos.setXYZ(i, x * scale, y * scale, z);
+    } else {
+      pos.setXYZ(i, x * scale, y, z * scale);
+    }
   }
   pos.needsUpdate = true;
   geo.computeVertexNormals?.();

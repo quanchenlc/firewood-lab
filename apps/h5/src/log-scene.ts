@@ -18,6 +18,7 @@ import {
   CAM_LOOK_AT_Y,
   CAM_RADIUS,
   applyBarkIrregularity,
+  applyStumpOutlineIrregularity,
   camLookAtY,
   sampleLogRound,
   type LogRoundDims,
@@ -329,9 +330,19 @@ export function createLogScene(
   let logCenterY = stumpTopY + roundDims.height * 0.5 + 0.002;
   lookAt.y = camLookAtY(roundDims, stumpTopY);
 
-  // Thin packed-earth ring under the stump only (not a dirt hill the log sits on).
+  // Thin packed-earth pad under the stump — match organic outline (not a clean disk).
+  const padGeo = new THREE.CircleGeometry(
+    Math.max(planted.topRadius * 1.25, planted.topRadius + 0.08),
+    48,
+  );
+  applyStumpOutlineIrregularity(padGeo, {
+    height: STUMP_BOT_RADIUS,
+    seed: 23,
+    ampIn: 0.35,
+    plane: 'xy',
+  });
   const pad = new THREE.Mesh(
-    new THREE.CircleGeometry(Math.max(planted.topRadius * 1.25, planted.topRadius + 0.08), 36),
+    padGeo,
     new THREE.MeshStandardMaterial({
       color: 0x8a6f52,
       roughness: 1,

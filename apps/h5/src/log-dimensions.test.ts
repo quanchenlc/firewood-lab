@@ -120,7 +120,7 @@ describe('log-dimensions (firewood-scale round)', () => {
     assert.ok(max - min > 0.08, `expected visible ellipse/lobe spread, got ${min}..${max}`);
     assert.ok(PLAN_ELLIPSE_AMP > 0 && PLAN_LOBE3_AMP > 0);
     // Still roughly round (not a wild star).
-    assert.ok(min > 0.75 && max < 1.25);
+    assert.ok(min > 0.7 && max < 1.35);
   });
 
   it('samplePlanRadii shows organic outline (max/min > 1.08)', () => {
@@ -137,8 +137,8 @@ describe('log-dimensions (firewood-scale round)', () => {
     }
     const { min, max, ratio } = samplePlanRadii(pts, dims);
     assert.ok(min > 0 && max > min);
-    assert.ok(ratio > 1.08, `expected imperfect circle ratio, got ${ratio.toFixed(3)}`);
-    assert.ok(ratio < 1.45, `should stay stump-like, got ${ratio.toFixed(3)}`);
+    assert.ok(ratio > 1.12, `expected imperfect circle ratio, got ${ratio.toFixed(3)}`);
+    assert.ok(ratio < 1.65, `should stay stump-like, got ${ratio.toFixed(3)}`);
     // Cap-rim bark offset is non-zero (reference displaces rim verts).
     assert.notEqual(radialBarkOffsetMetres(0.3, 1, dims.barkSeed), 0);
   });
