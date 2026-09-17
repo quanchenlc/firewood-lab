@@ -95,7 +95,10 @@ function closeChips(): void {
 
 async function boot(): Promise<void> {
   const preloaded = await preloadContentAssets(species, axes, setLoader);
-  const logScene = createLogScene(canvas, preloaded.stump, { weakDevice });
+  const logScene = createLogScene(canvas, preloaded.stump, {
+    weakDevice,
+    yard: preloaded.yard,
+  });
   await logScene.setSpecies(currentSpecies());
   logScene.setAxeVisual(preloaded.axes.get(axeSelect.value) ?? null);
   loaderEl.classList.add('is-done');

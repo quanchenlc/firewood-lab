@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { DestructibleMesh } from '@dgreenheck/three-pinata';
 import type { ChopOutcome, FracturePlan, Species } from '@firewood/game-core';
-import { loadSpeciesMaterials, type SpeciesMaterials } from './assets';
+import { loadSpeciesMaterials, type SpeciesMaterials, type YardTextures } from './assets';
 import { createFractureWorld, type FractureWorld, type PhysFragment } from './fracture-world';
 
 export interface LogScene {
@@ -111,10 +111,106 @@ function orientAxeGrip(root: THREE.Object3D): void {
   root.position.z -= c3.z;
 }
 
+/** Deterministic LCG so chip layout is stable across reloads. */
+function yardRand(seed: { n: number }): number {
+  seed.n = (seed.n * 1664525 + 1013904223) >>> 0;
+  return seed.n / 0xffffffff;
+}
+
+/**
+ * Lean wood chips + bark scraps around the chopping block (instanced, no extra textures).
+ * Keeps mobile draw calls low while breaking the "stump in a void" look.
+ */
+function addYardDebris(scene: THREE.Scene, opts: { weak: boolean }): void {
+  const count = opts.weak ? 28 : 42;
+  const seed = { n: 0xc0ffee41 };
+  const chipGeo = new THREE.BoxGeometry(1, 1, 1);
+  const barkMat = new THREE.MeshStandardMaterial({
+    color: 0x7a5338,
+    roughness: 0.92,
+    metalness: 0,
+  });
+  const faceMat = new THREE.MeshStandardMaterial({
+    color: 0xdfc08a,
+    roughness: 0.85,
+    metalness: 0,
+  });
+  const chipInst = new THREE.InstancedMesh(chipGeo, barkMat, count);
+  const faceInst = new THREE.InstancedMesh(chipGeo, faceMat, Math.max(8, Math.floor(count * 0.35)));
+  const dummy = new THREE.Object3D();
+  let faceIdx = 0;
+
+  for (let i = 0; i < count; i++) {
+    const ang = yardRand(seed) * Math.PI * 2;
+    // Prefer a ring around the stump; keep clear of the log footprint.
+    const rad = 0.95 + yardRand(seed) * 2.4 + (i % 5) * 0.08;
+    const x = Math.cos(ang) * rad;
+    const z = Math.sin(ang) * rad;
+    const sx = 0.05 + yardRand(seed) * 0.11;
+    const sy = 0.012 + yardRand(seed) * 0.028;
+    const sz = 0.03 + yardRand(seed) * 0.09;
+    dummy.position.set(x, sy * 0.5 + 0.002, z);
+    dummy.rotation.set(
+      (yardRand(seed) - 0.5) * 0.55,
+      yardRand(seed) * Math.PI * 2,
+      (yardRand(seed) - 0.5) * 0.7,
+    );
+    dummy.scale.set(sx, sy, sz);
+    dummy.updateMatrix();
+    chipInst.setMatrixAt(i, dummy.matrix);
+
+    // A subset of brighter face-grain flakes for visual variety.
+    if (faceIdx < faceInst.count && yardRand(seed) > 0.55) {
+      dummy.position.y += 0.004;
+      dummy.scale.set(sx * 0.85, sy * 0.7, sz * 1.1);
+      dummy.updateMatrix();
+      faceInst.setMatrixAt(faceIdx, dummy.matrix);
+      faceIdx += 1;
+    }
+  }
+
+  // Hide unused face instances by collapsing them.
+  for (let i = faceIdx; i < faceInst.count; i++) {
+    dummy.position.set(0, -10, 0);
+    dummy.scale.set(0.001, 0.001, 0.001);
+    dummy.updateMatrix();
+    faceInst.setMatrixAt(i, dummy.matrix);
+  }
+  chipInst.instanceMatrix.needsUpdate = true;
+  faceInst.instanceMatrix.needsUpdate = true;
+  chipInst.frustumCulled = true;
+  faceInst.frustumCulled = true;
+  scene.add(chipInst);
+  scene.add(faceInst);
+
+  // A few larger bark scraps (individual meshes, low count).
+  const scrapCount = opts.weak ? 4 : 7;
+  const scrapGeo = new THREE.CylinderGeometry(0.07, 0.09, 0.045, 6, 1, false, 0, Math.PI);
+  const scrapMat = new THREE.MeshStandardMaterial({
+    color: 0x4a3220,
+    roughness: 1,
+    metalness: 0,
+    flatShading: true,
+  });
+  for (let i = 0; i < scrapCount; i++) {
+    const ang = yardRand(seed) * Math.PI * 2;
+    const rad = 1.15 + yardRand(seed) * 1.6;
+    const scrap = new THREE.Mesh(scrapGeo, scrapMat);
+    scrap.position.set(Math.cos(ang) * rad, 0.02, Math.sin(ang) * rad);
+    scrap.rotation.set(
+      Math.PI / 2 + (yardRand(seed) - 0.5) * 0.4,
+      yardRand(seed) * Math.PI * 2,
+      (yardRand(seed) - 0.5) * 0.5,
+    );
+    scrap.scale.setScalar(0.75 + yardRand(seed) * 0.7);
+    scene.add(scrap);
+  }
+}
+
 export function createLogScene(
   canvas: HTMLCanvasElement,
   stumpModel: THREE.Object3D,
-  opts: { weakDevice?: boolean } = {},
+  opts: { weakDevice?: boolean; yard?: YardTextures } = {},
 ): LogScene {
   const weak = !!opts.weakDevice;
   const renderer = new THREE.WebGLRenderer({
@@ -127,11 +223,13 @@ export function createLogScene(
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  // Daytime outdoor feel (screen.toys/firewood airy look).
+  renderer.toneMappingExposure = weak ? 1.45 : 1.62;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x1a1410, 8, 18);
-  scene.background = new THREE.Color(0x1a1410);
+  // Soft daylight haze instead of dark void.
+  scene.fog = new THREE.Fog(0xd2dec8, 14, 32);
+  scene.background = new THREE.Color(0xd5e4cf);
 
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 50);
   let yaw = 0.7;
@@ -139,20 +237,48 @@ export function createLogScene(
   const lookAt = new THREE.Vector3(0, 0.7, 0);
   const camRadius = 4.4;
 
-  scene.add(new THREE.HemisphereLight(0xfff0dd, 0x2a1e14, 0.85));
-  const key = new THREE.DirectionalLight(0xffe2c0, 1.35);
-  key.position.set(3.4, 5.5, 2.2);
+  // Bright hemisphere: warm sky + greenish ground bounce.
+  scene.add(new THREE.HemisphereLight(0xfff8ee, 0x7f9a62, weak ? 1.45 : 1.75));
+  const key = new THREE.DirectionalLight(0xfff3dc, weak ? 2.15 : 2.65);
+  key.position.set(3.6, 6.8, 2.6);
   scene.add(key);
-  const fill = new THREE.DirectionalLight(0xb8c8e0, 0.35);
-  fill.position.set(-3, 2, -2);
+  const fill = new THREE.DirectionalLight(0xc2daf5, weak ? 0.7 : 0.95);
+  fill.position.set(-3.2, 2.8, -2.4);
   scene.add(fill);
+  const rim = new THREE.DirectionalLight(0xeef4ff, 0.4);
+  rim.position.set(-1.5, 3.8, 4.5);
+  scene.add(rim);
 
-  const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(3.4, 56),
-    new THREE.MeshStandardMaterial({ color: 0x2a2118, roughness: 1 }),
-  );
+  // Textured forest ground (lean 1K maps). Fall back to tinted plane if missing.
+  const yard = opts.yard;
+  const groundMat = new THREE.MeshStandardMaterial({
+    map: yard?.groundDiff,
+    normalMap: yard?.groundNor ?? undefined,
+    // Slight warm lift so the rocky albedo reads as daytime dirt/grass.
+    color: yard?.groundDiff ? 0xf3ecdf : 0x8ea56a,
+    roughness: 0.92,
+    metalness: 0,
+  });
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(7.2, weak ? 48 : 64), groundMat);
   ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
+  ground.receiveShadow = false;
   scene.add(ground);
+
+  // Packed earth pad under the chopping block so stump reads planted.
+  const pad = new THREE.Mesh(
+    new THREE.CircleGeometry(1.15, 40),
+    new THREE.MeshStandardMaterial({
+      color: 0x9a7d5c,
+      roughness: 1,
+      metalness: 0,
+    }),
+  );
+  pad.rotation.x = -Math.PI / 2;
+  pad.position.y = 0.005;
+  scene.add(pad);
+
+  addYardDebris(scene, { weak });
 
   // Real stump GLB (visual only) — Poly Haven tree_stump_02 is already upright (Y = height).
   const stump = stumpModel;

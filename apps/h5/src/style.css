@@ -1,9 +1,9 @@
 :root {
   color-scheme: dark;
-  --bg: #1a1410;
-  --panel: rgba(28, 22, 16, 0.82);
-  --ink: #f3e8d8;
-  --muted: #c4b39a;
+  --bg: #9aaf90;
+  --panel: rgba(28, 36, 24, 0.55);
+  --ink: #f7f3ea;
+  --muted: #e2d8c4;
   --accent: #d4a574;
   --sweet: #8fbf7a;
   --light: #e0c36a;
@@ -19,7 +19,7 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background: radial-gradient(ellipse at top, #3a2a1c 0%, var(--bg) 55%);
+  background: radial-gradient(ellipse at top, #e4eed8 0%, #c5d6b4 42%, #a8bd92 100%);
   color: var(--ink);
   font-family: var(--font);
   overflow: hidden;
@@ -56,7 +56,7 @@ body {
   z-index: 20;
   display: grid;
   place-items: center;
-  background: radial-gradient(ellipse at center, #3a2a1c 0%, #1a1410 70%);
+  background: radial-gradient(ellipse at center, #d5e3c6 0%, #9aaf90 70%);
   transition: opacity 280ms ease, visibility 280ms ease;
 }
 
@@ -75,11 +75,12 @@ body {
   margin: 0 0 8px;
   font-size: 1.45rem;
   letter-spacing: 0.02em;
+  color: #2c3524;
 }
 
 .loader-card p {
   margin: 0 0 12px;
-  color: var(--muted);
+  color: #4a5640;
   font-size: 0.88rem;
 }
 
@@ -149,15 +150,16 @@ body {
   z-index: 3;
   margin: 0;
   pointer-events: none;
-  color: var(--muted);
+  color: #f7f3ea;
   font-size: 0.72rem;
   letter-spacing: 0.02em;
   transition: opacity 280ms ease;
   white-space: nowrap;
+  text-shadow: 0 1px 6px rgba(30, 40, 20, 0.65);
 }
 
 .phase-hint.is-soft {
-  opacity: 0.42;
+  opacity: 0.55;
 }
 
 .phase-hint.is-gone {
@@ -173,8 +175,9 @@ body {
   pointer-events: none;
   font-size: 0.62rem;
   letter-spacing: 0.02em;
-  color: var(--muted);
-  opacity: 0.35;
+  color: #f7f3ea;
+  opacity: 0.55;
+  text-shadow: 0 1px 4px rgba(30, 40, 20, 0.55);
 }
 
 /* Collapsed edge chips for species / axe */
