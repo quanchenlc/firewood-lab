@@ -743,6 +743,21 @@ async function boot(): Promise<void> {
     splittableCount: () => logScene.fracture.fragments.filter((f) => f.splittable).length,
     firewoodCount: () => logScene.fracture.fragments.filter((f) => !f.onStump).length,
     stumpCount: () => logScene.fracture.fragments.filter((f) => f.onStump).length,
+    /** Debug: world pose of each fragment (radial = hypot(x,z); stump top R≈0.32). */
+    fragmentPoses: () =>
+      logScene.fracture.fragments.map((f) => {
+        const x = f.body.position.x;
+        const y = f.body.position.y;
+        const z = f.body.position.z;
+        return {
+          onStump: f.onStump,
+          splittable: f.splittable,
+          x: +x.toFixed(3),
+          y: +y.toFixed(3),
+          z: +z.toFixed(3),
+          radial: +Math.hypot(x, z).toFixed(3),
+        };
+      }),
     /** Debug: per-piece local volume (in³) + aspect for classification tuning. */
     pieceStats: () => {
       const INCH = 0.0254;

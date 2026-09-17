@@ -200,16 +200,16 @@ export function createFractureWorld(
   /**
    * Firewood toss feel — chips must clear the stump top and settle on the
    * surrounding yard ground (reference screen.toys/firewood), not rest on the block.
-   * Horizontal ~2.8–4.0 m/s + lift past stump radius ≈0.55 clears the ~0.35 collider.
+   * Start just past the stump collider, then a moderate outward arc into the yard ring.
    */
   const FIREWOOD_TOSS_SETTLE_MS = 1600;
-  const FIREWOOD_TOSS_LIFT = 0.16;
+  const FIREWOOD_TOSS_LIFT = 0.14;
   /** Radial clear past stump top before applying impulse (visual R≈0.32, collider ≥0.35). */
-  const FIREWOOD_TOSS_CLEAR_R = 0.55;
-  const FIREWOOD_TOSS_HX = 2.8;
-  const FIREWOOD_TOSS_HX_JIT = 1.2;
-  const FIREWOOD_TOSS_VY = 2.35;
-  const FIREWOOD_TOSS_VY_JIT = 0.85;
+  const FIREWOOD_TOSS_CLEAR_R = 0.48;
+  const FIREWOOD_TOSS_HX = 2.05;
+  const FIREWOOD_TOSS_HX_JIT = 0.85;
+  const FIREWOOD_TOSS_VY = 2.05;
+  const FIREWOOD_TOSS_VY_JIT = 0.7;
 
   function fitStumpCollider(next: { topY: number; height: number; radius: number }): void {
     const height = Math.max(0.28, next.height);
@@ -1240,11 +1240,11 @@ export function createFractureWorld(
       ensureDynamicBody(f);
       // Round-end: same clear-stump path, slightly hotter horizontal than chip toss.
       const { ox, oz } = clearStumpForToss(f);
-      const hx = 3.2 + Math.random() * 1.4;
+      const hx = 2.4 + Math.random() * 1.0;
       f.body.velocity.set(
-        ox * hx + (Math.random() - 0.5) * 0.6,
+        ox * hx + (Math.random() - 0.5) * 0.5,
         FIREWOOD_TOSS_VY + Math.random() * FIREWOOD_TOSS_VY_JIT,
-        oz * hx + (Math.random() - 0.5) * 0.6,
+        oz * hx + (Math.random() - 0.5) * 0.5,
       );
       f.body.angularVelocity.set(
         (Math.random() - 0.5) * 5,
