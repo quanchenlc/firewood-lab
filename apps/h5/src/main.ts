@@ -767,14 +767,51 @@ async function boot(): Promise<void> {
     isRecycling: () => logScene.isRecycling(),
     nudgeAzimuth: (sign: number) => logScene.nudgeAzimuth(sign),
     getOrbit: () => logScene.getOrbit(),
-    /** Thickness (inches) of aim target along live cleave normal. */
-    aimThicknessIn: () => {
-      if (!aimTarget) return null;
-      return logScene.fracture.thicknessInchesAlongNormal(aimTarget, liveCleaveFromCamera());
+    setOrbit: (yaw: number, pitch: number) => logScene.setOrbit(yaw, pitch),
+    /** Select smallest stump piece without chopping (peek / force paths). */
+    selectSmallest: () => {
+      if (roundFinishing || chopping) return false;
+      const candidates = logScene.fracture.fragments.filter((f) => f.splittable && f.mesh.visible);
+      if (candidates.length === 0) return false;
+      let best = candidates[0]!;
+      let bestVol = Infinity;
+      for (const f of candidates) {
+        const geom = f.mesh.geometry;
+        if (geom && !geom.boundingBox) geom.computeBoundingBox();
+        const bb = geom?.boundingBox;
+        if (!bb) continue;
+        const vol =
+          Math.max(1e-6, bb.max.x - bb.min.x) *
+          Math.max(1e-6, bb.max.y - bb.min.y) *
+          Math.max(1e-6, bb.max.z - bb.min.z);
+        if (vol < bestVol) {
+          bestVol = vol;
+          best = f;
+        }
+      }
+      const box = new THREE.Box3().setFromObject(best.mesh);
+      const center = box.getCenter(new THREE.Vector3());
+      center.y = (box.min.y + box.max.y) * 0.5;
+      aimPoint = center;
+      aimTarget = best.mesh;
+      aimGeneration = best.generation;
+      return true;
     },
-    isAimTooThin: () => {
+    /** Force toss current aim target as firewood (debug). */
+    tossAim: () => {
       if (!aimTarget) return false;
-      return logScene.fracture.isTooThinAlongNormal(aimTarget, liveCleaveFromCamera());
+      const ok = logScene.fracture.tossAsFirewood(aimTarget, {
+        planeNormal: liveCleaveFromCamera(),
+      });
+      if (ok) {
+        resultEl.textContent = '成柴 · 落地';
+        resultEl.className = 'result sweet';
+        aimPoint = null;
+        aimTarget = null;
+        setPhase('aim');
+        maybeFinishRound();
+      }
+      return ok;
     },
     /** Option A: perp thickness + firewood gate for current aim. */
     aimTooThinDecision: () => {
@@ -797,6 +834,15 @@ async function boot(): Promise<void> {
           alreadyFirewood,
         }),
       };
+    },
+    /** Thickness (inches) of aim target along live cleave normal. */
+    aimThicknessIn: () => {
+      if (!aimTarget) return null;
+      return logScene.fracture.thicknessInchesAlongNormal(aimTarget, liveCleaveFromCamera());
+    },
+    isAimTooThin: () => {
+      if (!aimTarget) return false;
+      return logScene.fracture.isTooThinAlongNormal(aimTarget, liveCleaveFromCamera());
     },
     setPointerNdc: (x: number, y: number) => {
       pointerNdc.x = x;
