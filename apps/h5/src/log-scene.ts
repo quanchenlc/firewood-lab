@@ -154,10 +154,22 @@ export function createLogScene(
   const stump = stumpModel;
   stump.position.set(0, 0.26, 0);
   scene.add(stump);
-
-  // Sit choppable round on stump top (~0.53 after normalize + lift).
-  const stumpTopY = 0.53;
-  const logCenterY = stumpTopY + LOG_HEIGHT * 0.5 + 0.02;
+  stump.updateMatrixWorld(true);
+  // Sit the round on the measured stump crown. Prefer a center ray hit so we
+  // land on the flat chopping face (bbox.max can be a high bark nub).
+  const stumpBox = new THREE.Box3().setFromObject(stump);
+  let stumpTopY = stumpBox.max.y - 0.02;
+  {
+    const ray = new THREE.Raycaster(
+      new THREE.Vector3(0, stumpBox.max.y + 1.5, 0),
+      new THREE.Vector3(0, -1, 0),
+    );
+    const hits = ray.intersectObject(stump, true);
+    if (hits[0]) {
+      stumpTopY = hits[0].point.y + 0.005;
+    }
+  }
+  const logCenterY = stumpTopY + LOG_HEIGHT * 0.5 + 0.01;
 
   let mats: SpeciesMaterials | null = null;
   let logMesh = createLogProxy();
@@ -220,7 +232,8 @@ export function createLogScene(
   nickMark.visible = false;
   scene.add(nickMark);
 
-  const fracture = createFractureWorld();
+  const fracture = createFractureWorld({ stumpSupportY: stumpTopY });
+  fracture.setStumpSupportY(stumpTopY);
   let shake = 0;
   let punch = 0;
   let nickT = -1;
@@ -232,7 +245,12 @@ export function createLogScene(
       new THREE.MeshStandardMaterial({ color: 0xd4b896, roughness: 0.9 }),
     ];
     const inner =
-      mats?.inner ?? new THREE.MeshStandardMaterial({ color: 0xc4a574, roughness: 0.9 });
+      mats?.inner ??
+      new THREE.MeshStandardMaterial({
+        color: 0xc4a574,
+        roughness: 0.9,
+        side: THREE.DoubleSide,
+      });
     const mesh = new DestructibleMesh(buildLogGeometry(), outer[0]!, inner);
     mesh.material = outer;
     mesh.position.set(0, logCenterY, 0);

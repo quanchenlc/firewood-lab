@@ -11,6 +11,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { createCanvas } from './endgrain-canvas.mjs';
+import { writeFaceGrain } from './facegrain-canvas.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const OUT = join(ROOT, 'apps/h5/public/assets');
@@ -109,10 +110,19 @@ function writeEndgrain() {
   }
 }
 
+function writeFacegrains() {
+  for (const [species, rgb] of Object.entries(ENDGRAIN_TINTS)) {
+    const dest = join(OUT, 'facegrain', `${species}.png`);
+    writeFaceGrain(dest, rgb);
+    console.log('  facegrain', dest);
+  }
+}
+
 async function main() {
   mkdirSync(OUT, { recursive: true });
   await pullBark();
   writeEndgrain();
+  writeFacegrains();
   const modelIndex = {};
   for (const m of MODELS) {
     const file = await pullModel(m.id, m.dir);

@@ -35,8 +35,13 @@ export interface SpeciesMaterials {
   endgrain: THREE.MeshStandardMaterial;
   /** Outer materials for cylinder groups: [side, top, bottom] */
   outer: THREE.MeshStandardMaterial[];
+  /** Longitudinal face-grain for vertical chop cut faces (not end-grain rings). */
   inner: THREE.MeshStandardMaterial;
   dispose(): void;
+}
+
+function facegrainUrlFromEndgrain(endgrainUrl: string): string {
+  return endgrainUrl.replace(/\/endgrain\//, '/facegrain/');
 }
 
 export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMaterials> {
@@ -44,28 +49,48 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
   if (!maps?.barkDiff) {
     const bark = new THREE.MeshStandardMaterial({ color: 0x8b5a2b, roughness: 0.9 });
     const end = new THREE.MeshStandardMaterial({ color: 0xd4b896, roughness: 0.92 });
+    const face = new THREE.MeshStandardMaterial({
+      color: 0xc4a574,
+      roughness: 0.88,
+      side: THREE.DoubleSide,
+    });
     return {
       bark,
       endgrain: end,
       outer: [bark, end, end],
-      inner: end.clone(),
+      inner: face,
       dispose() {
         bark.dispose();
         end.dispose();
+        face.dispose();
       },
     };
   }
 
-  const [diff, nor, rough, endMap] = await Promise.all([
+  const faceUrl = maps.endgrain ? facegrainUrlFromEndgrain(maps.endgrain) : null;
+  const [diff, nor, rough, endMap, faceMap] = await Promise.all([
     loadTexture(maps.barkDiff, THREE.SRGBColorSpace),
     maps.barkNor ? loadTexture(maps.barkNor) : Promise.resolve(null),
     maps.barkRough ? loadTexture(maps.barkRough) : Promise.resolve(null),
     maps.endgrain ? loadTexture(maps.endgrain, THREE.SRGBColorSpace) : Promise.resolve(null),
+    faceUrl
+      ? loadTexture(faceUrl, THREE.SRGBColorSpace).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   diff.repeat.set(1.2, 1);
   if (nor) nor.repeat.copy(diff.repeat);
   if (rough) rough.repeat.copy(diff.repeat);
+
+  // Caps: one ring pattern per face — clamp so UV edges don't tile a bullseye.
+  if (endMap) {
+    endMap.wrapS = endMap.wrapT = THREE.ClampToEdgeWrapping;
+    endMap.repeat.set(1, 1);
+  }
+  if (faceMap) {
+    faceMap.wrapS = faceMap.wrapT = THREE.ClampToEdgeWrapping;
+    faceMap.repeat.set(0.85, 1.15);
+  }
 
   const bark = new THREE.MeshStandardMaterial({
     map: diff,
@@ -82,7 +107,17 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
     metalness: 0,
   });
 
-  const inner = endgrain.clone();
+  // Cut faces: longitudinal grain + DoubleSide (not end-grain rings).
+  const inner = new THREE.MeshStandardMaterial({
+    map: faceMap ?? undefined,
+    color: faceMap ? 0xf0e0d0 : 0xc4a574,
+    roughness: 0.88,
+    metalness: 0,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
+  });
 
   return {
     bark,
@@ -94,6 +129,7 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
       nor?.dispose();
       rough?.dispose();
       endMap?.dispose();
+      faceMap?.dispose();
       bark.dispose();
       endgrain.dispose();
       inner.dispose();
@@ -162,7 +198,13 @@ export async function preloadContentAssets(
     // Touch-load via Image to warm HTTP cache; materials built later
     if (first.maps?.barkDiff) {
       await Promise.all(
-        [first.maps.barkDiff, first.maps.barkNor, first.maps.barkRough, first.maps.endgrain]
+        [
+          first.maps.barkDiff,
+          first.maps.barkNor,
+          first.maps.barkRough,
+          first.maps.endgrain,
+          first.maps.endgrain?.replace(/\/endgrain\//, '/facegrain/'),
+        ]
           .filter(Boolean)
           .map(
             (u) =>
