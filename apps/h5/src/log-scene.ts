@@ -3,7 +3,7 @@ import { DestructibleMesh } from '@dgreenheck/three-pinata';
 import type { ChopOutcome, FracturePlan, Species } from '@firewood/game-core';
 import {
   loadSpeciesMaterials,
-  plantChoppingStump,
+  type PlantedStump,
   type SpeciesMaterials,
   type YardTextures,
 } from './assets';
@@ -214,7 +214,7 @@ function addYardDebris(scene: THREE.Scene, opts: { weak: boolean }): void {
 
 export function createLogScene(
   canvas: HTMLCanvasElement,
-  stumpModel: THREE.Object3D,
+  choppingBlock: PlantedStump,
   opts: { weakDevice?: boolean; yard?: YardTextures } = {},
 ): LogScene {
   const weak = !!opts.weakDevice;
@@ -257,10 +257,26 @@ export function createLogScene(
   // Textured forest ground (lean 1K maps). Fall back to tinted plane if missing.
   const yard = opts.yard;
   if (yard?.sky) {
-    // Poly Haven pure-sky HDRI — daytime outdoor, not flat fog void.
-    // Background only: keep prior key/fill/rim lighting as the main exposure.
-    scene.background = yard.sky;
-    scene.fog = new THREE.Fog(0xc5d6ea, 20, 48);
+    // Sky dome (inward sphere) — daytime outdoor, not flat fog void.
+    // Prefer mesh map over scene.background equirect for mobile/software GL.
+    if (yard.sky.mapping === THREE.EquirectangularReflectionMapping) {
+      scene.background = yard.sky;
+    } else {
+      const skyDome = new THREE.Mesh(
+        new THREE.SphereGeometry(48, weak ? 24 : 40, weak ? 12 : 20),
+        new THREE.MeshBasicMaterial({
+          map: yard.sky,
+          side: THREE.BackSide,
+          depthWrite: false,
+          fog: false,
+        }),
+      );
+      skyDome.frustumCulled = false;
+      scene.add(skyDome);
+      scene.background = new THREE.Color(0x8fb0d4);
+    }
+    // Very light haze only — keep clouds readable on mobile.
+    scene.fog = new THREE.Fog(0xc8d4e6, 32, 75);
   }
 
   const groundMat = new THREE.MeshStandardMaterial({
@@ -280,16 +296,16 @@ export function createLogScene(
   addYardDebris(scene, { weak });
 
   // Hierarchy: ground → stump chopping block (flat cut top) → upright round on face.
-  const planted = plantChoppingStump(stumpModel);
+  const planted = choppingBlock;
   const stump = planted.root;
   scene.add(stump);
   stump.updateMatrixWorld(true);
   const stumpTopY = planted.topY;
-  const logCenterY = stumpTopY + LOG_HEIGHT * 0.5 + 0.008;
+  const logCenterY = stumpTopY + LOG_HEIGHT * 0.5 + 0.002;
 
   // Thin packed-earth ring under the stump only (not a dirt hill the log sits on).
   const pad = new THREE.Mesh(
-    new THREE.CircleGeometry(Math.max(0.55, planted.topRadius * 1.15), 36),
+    new THREE.CircleGeometry(Math.max(0.55, planted.topRadius * 1.2), 36),
     new THREE.MeshStandardMaterial({
       color: 0x8a6f52,
       roughness: 1,

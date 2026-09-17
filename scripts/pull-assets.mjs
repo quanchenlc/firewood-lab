@@ -38,7 +38,9 @@ const MODELS = [
 const GROUND = [{ id: 'forest_ground_04', dir: 'ground/forest_ground_04' }];
 
 /** Daytime pure-sky HDRIs (1K Radiance) — mobile-friendly equirect backgrounds. */
-const SKIES = [{ id: 'kloofendal_43d_clear_puresky', dir: 'sky/kloofendal_43d_clear_puresky', file: 'sky_1k.hdr' }];
+const SKIES = [
+  { id: 'kloofendal_48d_partly_cloudy_puresky', dir: 'sky/kloofendal_48d_partly_cloudy_puresky', file: 'sky_1k.hdr' },
+];
 
 const ENDGRAIN_TINTS = {
   pinus: [210, 180, 120],
@@ -115,6 +117,11 @@ async function pullSkies() {
     const hdr = files.hdri?.['1k']?.hdr;
     if (!hdr?.url) throw new Error(`No hdri/1k/hdr for ${item.id}`);
     await download(hdr.url, join(OUT, item.dir, item.file));
+    // Tonemapped JPG → mobile equirect background (resize externally if needed).
+    const tm = files.tonemapped;
+    if (tm?.url) {
+      await download(tm.url, join(OUT, item.dir, 'sky_tonemapped_full.jpg'));
+    }
   }
 }
 
@@ -166,8 +173,9 @@ async function main() {
       diff: 'ground/forest_ground_04/diff.jpg',
       nor: 'ground/forest_ground_04/nor.jpg',
     },
-    kloofendal_43d_clear_puresky: {
-      hdr: 'sky/kloofendal_43d_clear_puresky/sky_1k.hdr',
+    kloofendal_48d_partly_cloudy_puresky: {
+      hdr: 'sky/kloofendal_48d_partly_cloudy_puresky/sky_1k.hdr',
+      jpg: 'sky/kloofendal_48d_partly_cloudy_puresky/sky_2k.jpg',
     },
   };
   writeFileSync(

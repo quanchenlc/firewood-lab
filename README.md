@@ -61,7 +61,7 @@ scripts/pull-assets.mjs  # 从 Poly Haven API 拉取 1K 贴图与 GLTF
 | 树桩 GLTF `tree_stump_02` | Poly Haven | CC0 |
 | 斧头 GLTF（hatchet / wooden_axe / wooden_axe_03 / sledgehammer_01） | Poly Haven | CC0 |
 | 地面 `forest_ground_04` | Poly Haven | CC0 |
-| 天空 HDRI `kloofendal_43d_clear_puresky`（1K） | Poly Haven | CC0 |
+| 天空 HDRI `kloofendal_48d_partly_cloudy_puresky`（1K HDR + 2K JPG） | Poly Haven | CC0 |
 | 断面年轮（端盖） | 仓库脚本生成 | 项目自有 |
 | 劈面纵纹（切面） | 仓库脚本生成 | 项目自有 |
 
