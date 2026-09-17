@@ -2,12 +2,12 @@ import './style.css';
 import * as THREE from 'three';
 import { DestructibleMesh } from '@dgreenheck/three-pinata';
 import {
-  advanceOrientChopCount,
   CHOPS_BEFORE_ORIENT_ROTATE,
   cleaveNormalFromCameraFacing,
   getSweetSliderRange,
   planFracture,
   resolveChop,
+  rotateCleaveNormal90,
   type Axe,
   type ChopOutcome,
   type Species,
@@ -297,7 +297,7 @@ async function boot(): Promise<void> {
   }
 
   function aimAt(clientX: number, clientY: number): boolean {
-    if (roundFinishing || logScene.isRecycling()) return false;
+    if (roundFinishing || logScene.isRecycling() || chopping) return false;
     const rect = canvas.getBoundingClientRect();
     pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
@@ -327,6 +327,7 @@ async function boot(): Promise<void> {
 
   function doChop(): void {
     if (phase !== 'power' || !aimPoint || !aimTarget || chopping || roundFinishing) return;
+    clearChopTimers();
     chopping = true;
     lockedSlider01 = rhythm01;
     const sp = currentSpecies();
@@ -373,6 +374,22 @@ async function boot(): Promise<void> {
         logScene.clearMarker();
       } else {
         logScene.fractureAt(target, point, plan, generation, { planeNormal });
+        // Count successful splits at impact (not on UI timer) so 4→90° is reliable.
+        if (lockedCleaveNormal) {
+          orientSuccessCount += 1;
+          if (orientSuccessCount >= CHOPS_BEFORE_ORIENT_ROTATE) {
+            const [rx, rz] = rotateCleaveNormal90(lockedCleaveNormal.x, lockedCleaveNormal.z);
+            lockedCleaveNormal.set(rx, 0, rz);
+            orientSuccessCount = 0;
+            orientFamilyIndex += 1;
+            resultEl.textContent = '转向 · 换劈纹';
+            resultEl.className = 'result sweet';
+            console.info('[firewood] cleave yaw 90°', {
+              family: orientFamilyIndex,
+              cleave: { x: rx, z: rz },
+            });
+          }
+        }
       }
     }, IMPACT_DELAY_MS);
 
@@ -387,22 +404,6 @@ async function boot(): Promise<void> {
         if (!aimPoint || !aimTarget) armLockedTarget();
         setPhase('power');
         return;
-      }
-
-      // Successful chop: count toward 90° orientation flip.
-      if (lockedCleaveNormal) {
-        const adv = advanceOrientChopCount(
-          orientSuccessCount,
-          lockedCleaveNormal.x,
-          lockedCleaveNormal.z,
-        );
-        orientSuccessCount = adv.count;
-        lockedCleaveNormal.set(adv.nx, 0, adv.nz);
-        if (adv.rotated) {
-          orientFamilyIndex += 1;
-          resultEl.textContent = '转向 · 换劈纹';
-          resultEl.className = 'result sweet';
-        }
       }
 
       if (maybeFinishRound()) {
