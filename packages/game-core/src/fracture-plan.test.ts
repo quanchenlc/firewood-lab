@@ -381,7 +381,7 @@ describe('tipDropRestPose / sampleTipDropPose', () => {
   it('tip-drop duration/angle constants stay in a natural short-settle band', () => {
     assert.ok(TIP_DROP_DURATION_MS >= 280 && TIP_DROP_DURATION_MS <= 420);
     assert.ok(TIP_DROP_ANGLE_DEG >= 60 && TIP_DROP_ANGLE_DEG <= 95);
-    assert.ok(TIP_DROP_REST_RADIAL >= 0.5 && TIP_DROP_REST_RADIAL <= 0.75);
+    assert.ok(TIP_DROP_REST_RADIAL >= 0.55 && TIP_DROP_REST_RADIAL <= 0.85);
     assert.ok(TIP_DROP_SCATTER_RADIAL > TIP_DROP_REST_RADIAL);
   });
 });

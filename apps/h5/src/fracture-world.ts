@@ -1164,35 +1164,6 @@ export function createFractureWorld(
     }
   }
 
-  /** Rebuild a static stump body as dynamic (shared by tip-drop handoff + scatter). */
-  function ensureDynamicBody(f: PhysFragment): void {
-    if (f.body.type !== CANNON.Body.STATIC && f.body.mass !== 0) return;
-    const pos = f.body.position.clone();
-    const quat = f.body.quaternion.clone();
-    world.removeBody(f.body);
-    const box = new THREE.Box3().setFromObject(f.mesh);
-    const size = box.getSize(new THREE.Vector3());
-    const half = new CANNON.Vec3(
-      Math.max(0.04, size.x * 0.46),
-      Math.max(0.04, size.y * 0.46),
-      Math.max(0.04, size.z * 0.46),
-    );
-    const volume = Math.max(0.002, size.x * size.y * size.z);
-    f.body = new CANNON.Body({
-      mass: Math.max(0.1, volume * 180),
-      type: CANNON.Body.DYNAMIC,
-      shape: new CANNON.Box(half),
-      material: woodMat,
-      position: pos,
-      quaternion: quat,
-      // Soft wood-on-dirt after scripted tip — high damping, low bounce.
-      linearDamping: 0.55,
-      angularDamping: 0.62,
-      allowSleep: true,
-    });
-    world.addBody(f.body);
-  }
-
   function freezeForScriptedPose(f: PhysFragment): void {
     f.body.velocity.set(0, 0, 0);
     f.body.angularVelocity.set(0, 0, 0);
@@ -1204,11 +1175,26 @@ export function createFractureWorld(
   }
 
   function finishTipDropHandoff(f: PhysFragment): void {
-    ensureDynamicBody(f);
-    f.body.velocity.set(0, 0, 0);
-    f.body.angularVelocity.set(0, 0, 0);
+    // Stay STATIC on the scripted ground pose. Re-enabling DYNAMIC here made
+    // large chips re-hit the stump collider and pop back onto the top.
+    freezeForScriptedPose(f);
+    f.body.position.set(
+      f.mesh.position.x,
+      f.mesh.position.y,
+      f.mesh.position.z,
+    );
+    f.body.quaternion.set(
+      f.mesh.quaternion.x,
+      f.mesh.quaternion.y,
+      f.mesh.quaternion.z,
+      f.mesh.quaternion.w,
+    );
     f.settleUntil = performance.now() + TIP_DROP_POST_SETTLE_MS;
-    f.body.wakeUp();
+    try {
+      f.body.sleep();
+    } catch {
+      /* static bodies may already be asleep */
+    }
   }
 
   /** Rest half-height after tipping onto the thinnest axis. */

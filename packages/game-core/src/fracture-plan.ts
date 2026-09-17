@@ -78,17 +78,18 @@ export const TIP_DROP_YAW_JIT_DEG = 8;
 export const TIP_DROP_ARC_HEIGHT = 0.028;
 /**
  * Rest radial band beside the stump (metres from origin).
- * Stump visual R≈0.32 / collider ≥0.35 — keep chips off the top face.
+ * Stump visual R≈0.32 / collider ≥0.35 — keep chips clear of the top face
+ * and far enough that a tipped AABB does not re-intersect the cylinder.
  */
-export const TIP_DROP_REST_RADIAL = 0.58;
-export const TIP_DROP_REST_RADIAL_JIT = 0.12;
+export const TIP_DROP_REST_RADIAL = 0.66;
+export const TIP_DROP_REST_RADIAL_JIT = 0.14;
 /** Round-end scatter rests a bit farther out than single-chip tip-drop. */
-export const TIP_DROP_SCATTER_RADIAL = 0.72;
-export const TIP_DROP_SCATTER_RADIAL_JIT = 0.18;
+export const TIP_DROP_SCATTER_RADIAL = 0.82;
+export const TIP_DROP_SCATTER_RADIAL_JIT = 0.2;
 /** Ground clearance for a tipped chip center (added to half-thickness). */
 export const TIP_DROP_GROUND_PAD = 0.02;
-/** How long soft physics may run after the scripted tip settles (ms). */
-export const TIP_DROP_POST_SETTLE_MS = 900;
+/** Reserved soft-physics window after tip (ms). Currently settle stays STATIC. */
+export const TIP_DROP_POST_SETTLE_MS = 200;
 
 export interface FracturePlan {
   /** 0 = do not fracture (too_light). Target piece budget for cleave recursion. */
