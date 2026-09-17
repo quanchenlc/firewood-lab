@@ -575,7 +575,22 @@ async function boot(): Promise<void> {
     fragmentCount: () => logScene.fracture.fragments.length,
     splittableCount: () => logScene.fracture.fragments.filter((f) => f.splittable).length,
     isRecycling: () => logScene.isRecycling(),
-    forceFinish: () => maybeFinishRound(),
+    /** Demo/test: force scatter→ring even if pieces remain. */
+    forceFinish: () => {
+      if (roundFinishing) return true;
+      roundFinishing = true;
+      lockedCleaveNormal = null;
+      orientSuccessCount = 0;
+      resultEl.textContent = '收柴入库';
+      resultEl.className = 'result sweet';
+      phaseHint.classList.add('is-gone');
+      logScene.scatterAndRecycle();
+      window.setTimeout(() => {
+        roundFinishing = false;
+        resetRound({ keepPile: true });
+      }, 2200);
+      return true;
+    },
     /** Stump-piece horizontal centers + pairwise gap (for bounce/offset checks). */
     stumpGap: () => {
       const stump = logScene.fracture.fragments.filter((f) => f.onStump && f.mesh.visible);
