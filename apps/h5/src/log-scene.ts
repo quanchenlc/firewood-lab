@@ -15,6 +15,10 @@ export interface LogScene {
   getOrbit(): { yaw: number; pitch: number };
   placeMarker(point: THREE.Vector3, normal: THREE.Vector3): void;
   clearMarker(): void;
+  /** Horizontal camera facing in XZ (for cleave plane from view). */
+  getCameraFacingXZ(): { x: number; z: number };
+  scatterAndRecycle(): void;
+  isRecycling(): boolean;
   playNick(aimPoint: THREE.Vector3): void;
   fractureAt(
     target: DestructibleMesh,
@@ -35,7 +39,7 @@ export interface LogScene {
     bitDir: number[];
     handleDotUp: number;
   };
-  resetLog(): void;
+  resetLog(opts?: { keepPile?: boolean }): void;
   setSpecies(species: Species): Promise<void>;
   setAxeVisual(root: THREE.Object3D | null): void;
   playAxeSwing(aimPoint: THREE.Vector3, opts?: { rebound?: boolean }): void;
@@ -283,14 +287,34 @@ export function createLogScene(
     camera.updateProjectionMatrix();
   }
 
-  function placeMarker(point: THREE.Vector3, normal: THREE.Vector3): void {
-    marker.visible = true;
-    marker.position.copy(point);
-    marker.lookAt(point.clone().add(normal));
+  function placeMarker(_point: THREE.Vector3, _normal: THREE.Vector3): void {
+    // Aim marker removed — chop plane comes from camera facing.
+    marker.visible = false;
   }
 
   function clearMarker(): void {
     marker.visible = false;
+  }
+
+  function getCameraFacingXZ(): { x: number; z: number } {
+    camera.getWorldDirection(_camFwd);
+    const fx = _camFwd.x;
+    const fz = _camFwd.z;
+    const len = Math.hypot(fx, fz);
+    if (len < 1e-8) return { x: 0, z: 1 };
+    return { x: fx / len, z: fz / len };
+  }
+
+  function scatterAndRecycle(): void {
+    fracture.scatterToGround();
+    // Let physics fling briefly, then pull into the side ring pile.
+    window.setTimeout(() => {
+      fracture.recycleToRing({ radius: 2.4, groundY: 0.06 });
+    }, 720);
+  }
+
+  function isRecycling(): boolean {
+    return fracture.isRecycling();
   }
 
   function getRaycastTargets(): THREE.Object3D[] {
@@ -369,8 +393,9 @@ export function createLogScene(
     return { mesh: best.mesh, point: center, generation: best.generation };
   }
 
-  function resetLog(): void {
-    fracture.clearFragments();
+  function resetLog(opts?: { keepPile?: boolean }): void {
+    if (opts?.keepPile) fracture.clearStumpPieces();
+    else fracture.clearFragments();
     nickMark.visible = false;
     nickT = -1;
     lastCleaveNormal = null;
@@ -625,6 +650,9 @@ export function createLogScene(
     getOrbit: () => ({ yaw, pitch }),
     placeMarker,
     clearMarker,
+    getCameraFacingXZ,
+    scatterAndRecycle,
+    isRecycling,
     playNick,
     fractureAt,
     resetLog,

@@ -102,6 +102,51 @@ export function cleaveNormalXZ(
 }
 
 /**
+ * Vertical cleave plane from camera horizontal facing.
+ * Plane contains facing + world up → normal is ⊥ facing in XZ (split L/R on screen).
+ */
+export function cleaveNormalFromCameraFacing(
+  fwdX: number,
+  fwdZ: number,
+): readonly [number, number] {
+  let nx = fwdZ;
+  let nz = -fwdX;
+  const len = Math.hypot(nx, nz);
+  if (len < 1e-8) return [1, 0];
+  return [nx / len, nz / len];
+}
+
+/** Rotate a unit XZ cleave normal 90° CCW (vertical family → horizontal family). */
+export function rotateCleaveNormal90(nx: number, nz: number): readonly [number, number] {
+  const len = Math.hypot(nx, nz);
+  if (len < 1e-8) return [0, 1];
+  const x = nx / len;
+  const z = nz / len;
+  return [-z, x];
+}
+
+/** Successful chops in one direction before the plane yaws 90°. */
+export const CHOPS_BEFORE_ORIENT_ROTATE = 4;
+
+/**
+ * Track same-direction successful chops; after N, rotate the cleave normal 90°.
+ * `too_light` / nick does not count.
+ */
+export function advanceOrientChopCount(
+  successCount: number,
+  nx: number,
+  nz: number,
+  chopsBeforeRotate: number = CHOPS_BEFORE_ORIENT_ROTATE,
+): { count: number; nx: number; nz: number; rotated: boolean } {
+  const next = successCount + 1;
+  if (next < chopsBeforeRotate) {
+    return { count: next, nx, nz, rotated: false };
+  }
+  const [rx, rz] = rotateCleaveNormal90(nx, nz);
+  return { count: 0, nx: rx, nz: rz, rotated: true };
+}
+
+/**
  * Decide cleave budget + lateral impulse from resolveChop outcome.
  * Sweet → clean 2-way planar split; too_heavy → more pieces, still sideways.
  */

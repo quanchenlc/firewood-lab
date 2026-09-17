@@ -17,6 +17,10 @@ export type { FractureHook, FractureHookContext } from './hooks.ts';
 export {
   planFracture,
   cleaveNormalXZ,
+  cleaveNormalFromCameraFacing,
+  rotateCleaveNormal90,
+  advanceOrientChopCount,
+  CHOPS_BEFORE_ORIENT_ROTATE,
   isRechopWorthy,
   isFirewoodChip,
   lateralOffsetFromDiameter,

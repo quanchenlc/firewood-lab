@@ -2,10 +2,12 @@ import './style.css';
 import * as THREE from 'three';
 import { DestructibleMesh } from '@dgreenheck/three-pinata';
 import {
-  cleaveNormalXZ,
+  CHOPS_BEFORE_ORIENT_ROTATE,
+  cleaveNormalFromCameraFacing,
   getSweetSliderRange,
   planFracture,
   resolveChop,
+  rotateCleaveNormal90,
   type Axe,
   type ChopOutcome,
   type Species,
@@ -19,7 +21,7 @@ import { createLogScene, tintLog } from './log-scene';
 type Phase = 'aim' | 'power' | 'result';
 
 const platform = createH5Platform();
-platform.storage.setItem('firewood.h5.loop', 'rhythm-click-v2');
+platform.storage.setItem('firewood.h5.loop', 'camera-facing-recycle-v1');
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
 const flashEl = document.querySelector<HTMLDivElement>('#flash')!;
@@ -105,8 +107,16 @@ async function boot(): Promise<void> {
   let aimPoint: THREE.Vector3 | null = null;
   let aimTarget: DestructibleMesh | null = null;
   let aimGeneration = 0;
-  /** After first contact, subsequent taps reuse this vertical cleave direction. */
+  /**
+   * Locked vertical cleave-plane normal (from camera facing at first click).
+   * After CHOPS_BEFORE_ORIENT_ROTATE successes, yaw 90° and reset the counter.
+   */
   let lockedCleaveNormal: THREE.Vector3 | null = null;
+  /** Successful chops (sweet/heavy) in the current orientation family. */
+  let orientSuccessCount = 0;
+  /** How many 90° orientation flips this round (0 = first family, 1 = after rotate). */
+  let orientFamilyIndex = 0;
+  let roundFinishing = false;
   let lastOutcome: ChopOutcome | null = null;
   let speciesBusy = false;
   let tabHidden = typeof document !== 'undefined' && document.hidden;
@@ -158,16 +168,18 @@ async function boot(): Promise<void> {
       phaseHint.classList.add('is-soft');
       phaseHint.textContent = logScene.fracture.fragments.some((f) => f.splittable)
         ? lockedCleaveNormal
-          ? '再点继续劈'
-          : '点剩余木块继续'
-        : '拖动旋转 · 点木头开始';
+          ? orientSuccessCount >= CHOPS_BEFORE_ORIENT_ROTATE - 1
+            ? '点木块 · 下一刀将转向'
+            : '点木块继续劈'
+          : '点木块继续'
+        : '拖动旋转视角 · 点木头开始';
       if (!lastOutcome) {
         resultEl.textContent = '';
         resultEl.className = 'result is-soft';
       }
     } else if (next === 'power') {
       phaseHint.classList.remove('is-gone', 'is-soft');
-      phaseHint.textContent = lockedCleaveNormal ? '再点一下劈下' : '再点一下劈下';
+      phaseHint.textContent = '再点一下劈下';
     } else {
       phaseHint.classList.add('is-gone');
       phaseHint.textContent = '';
@@ -250,7 +262,42 @@ async function boot(): Promise<void> {
     return true;
   }
 
+  /** Capture / refresh cleave normal from current camera horizontal facing. */
+  function lockCleaveFromCamera(): THREE.Vector3 {
+    const facing = logScene.getCameraFacingXZ();
+    const [nx, nz] = cleaveNormalFromCameraFacing(facing.x, facing.z);
+    lockedCleaveNormal = new THREE.Vector3(nx, 0, nz);
+    return lockedCleaveNormal;
+  }
+
+  /**
+   * Completion rule (documented):
+   * Round ends when there are no more rechop-worthy splittable pieces left
+   * (after the optional 90° orientation flip has had a chance to run, pieces
+   * simply become too small / non-splittable). Then: scatter → ring recycle.
+   */
+  function maybeFinishRound(): boolean {
+    if (roundFinishing) return true;
+    const hasSplittable = logScene.fracture.fragments.some((f) => f.splittable && f.mesh.visible);
+    const hasLog = logScene.logMesh.visible && !!logScene.logMesh.parent;
+    if (hasSplittable || hasLog) return false;
+    roundFinishing = true;
+    lockedCleaveNormal = null;
+    orientSuccessCount = 0;
+    resultEl.textContent = '收柴入库';
+    resultEl.className = 'result sweet';
+    phaseHint.classList.add('is-gone');
+    logScene.scatterAndRecycle();
+    window.setTimeout(() => {
+      // After ring settle, ready for a fresh round (keep pile; reset log).
+      roundFinishing = false;
+      resetRound({ keepPile: true });
+    }, 2200);
+    return true;
+  }
+
   function aimAt(clientX: number, clientY: number): boolean {
+    if (roundFinishing || logScene.isRecycling() || chopping) return false;
     const rect = canvas.getBoundingClientRect();
     pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
@@ -265,25 +312,22 @@ async function boot(): Promise<void> {
     const frag = logScene.findFragment(obj);
     aimGeneration = frag?.generation ?? (obj.userData.generation as number) ?? 0;
 
-    // First contact locks the vertical cleave family from aim vs piece center.
+    // First contact locks cleave from camera facing (not a wood marker).
     if (!lockedCleaveNormal) {
-      const box = new THREE.Box3().setFromObject(obj);
-      const center = box.getCenter(new THREE.Vector3());
-      const [nx, nz] = cleaveNormalXZ(hit.point.x, hit.point.z, center.x, center.z);
-      lockedCleaveNormal = new THREE.Vector3(nx, 0, nz);
+      lockCleaveFromCamera();
+      orientSuccessCount = 0;
+      orientFamilyIndex = 0;
     }
 
-    const normal =
-      hit.face?.normal.clone().transformDirection(hit.object.matrixWorld) ??
-      new THREE.Vector3(0, 1, 0);
-    logScene.placeMarker(hit.point, normal);
+    logScene.clearMarker();
     platform.audio.play('aim', { volume: 0.25 });
     setPhase('power');
     return true;
   }
 
   function doChop(): void {
-    if (phase !== 'power' || !aimPoint || !aimTarget || chopping) return;
+    if (phase !== 'power' || !aimPoint || !aimTarget || chopping || roundFinishing) return;
+    clearChopTimers();
     chopping = true;
     lockedSlider01 = rhythm01;
     const sp = currentSpecies();
@@ -302,7 +346,8 @@ async function boot(): Promise<void> {
     const point = aimPoint.clone();
     const generation = aimGeneration;
     const rebound = outcome === 'too_light';
-    const planeNormal = lockedCleaveNormal?.clone() ?? null;
+    if (!lockedCleaveNormal) lockCleaveFromCamera();
+    const planeNormal = lockedCleaveNormal!.clone();
 
     // Always swing top→down in the vertical plane; rebound when force is too light.
     logScene.playAxeSwing(point, { rebound });
@@ -327,22 +372,24 @@ async function boot(): Promise<void> {
       if (plan.nickOnly) {
         logScene.playNick(point);
         logScene.clearMarker();
-      } else if (target.parent || target.visible) {
-        logScene.fractureAt(
-          target,
-          point,
-          plan,
-          generation,
-          planeNormal ? { planeNormal } : undefined,
-        );
       } else {
-        logScene.fractureAt(
-          target,
-          point,
-          plan,
-          generation,
-          planeNormal ? { planeNormal } : undefined,
-        );
+        logScene.fractureAt(target, point, plan, generation, { planeNormal });
+        // Count successful splits at impact (not on UI timer) so 4→90° is reliable.
+        if (lockedCleaveNormal) {
+          orientSuccessCount += 1;
+          if (orientSuccessCount >= CHOPS_BEFORE_ORIENT_ROTATE) {
+            const [rx, rz] = rotateCleaveNormal90(lockedCleaveNormal.x, lockedCleaveNormal.z);
+            lockedCleaveNormal.set(rx, 0, rz);
+            orientSuccessCount = 0;
+            orientFamilyIndex += 1;
+            resultEl.textContent = '转向 · 换劈纹';
+            resultEl.className = 'result sweet';
+            console.info('[firewood] cleave yaw 90°', {
+              family: orientFamilyIndex,
+              cleave: { x: rx, z: rz },
+            });
+          }
+        }
       }
     }, IMPACT_DELAY_MS);
 
@@ -352,35 +399,43 @@ async function boot(): Promise<void> {
       chopping = false;
       if (phase !== 'result') return;
 
-      if (rebound && lockedCleaveNormal) {
+      if (rebound) {
         // Weak force: keep locked direction + same aim; rhythm bar continues.
         if (!aimPoint || !aimTarget) armLockedTarget();
         setPhase('power');
         return;
       }
 
-      // Successful (or heavy) chop: auto-arm next parallel slice — no re-aim.
-      if (lockedCleaveNormal && armLockedTarget()) {
-        setPhase('power');
-      } else {
-        aimPoint = null;
-        aimTarget = null;
+      if (maybeFinishRound()) {
         setPhase('aim');
+        return;
       }
+
+      // Next chop needs a fresh click-at-hit (no aim marker); keep direction lock.
+      aimPoint = null;
+      aimTarget = null;
+      setPhase('aim');
     }, 720);
   }
 
-  function resetRound(): void {
+  function resetRound(opts?: { keepPile?: boolean }): void {
     clearChopTimers();
     chopping = false;
+    roundFinishing = false;
     aimPoint = null;
     aimTarget = null;
     aimGeneration = 0;
     lockedCleaveNormal = null;
+    orientSuccessCount = 0;
+    orientFamilyIndex = 0;
     lastOutcome = null;
     hudLean = false;
     phaseHint.classList.remove('is-gone');
-    logScene.resetLog();
+    if (!opts?.keepPile) {
+      logScene.resetLog();
+    } else {
+      logScene.resetLog({ keepPile: true });
+    }
     void logScene.setSpecies(currentSpecies());
     setPhase('aim');
   }
@@ -471,16 +526,11 @@ async function boot(): Promise<void> {
         const cx = rect.left + sample.x;
         const cy = rect.top + sample.y;
         if (phase === 'power' && !chopping) {
-          // Confirm swing — first chop or locked multi-chop (no re-aim).
+          // Confirm swing from rhythm bar / second click.
           doChop();
         } else if (phase === 'aim' && !chopping) {
-          if (lockedCleaveNormal && armLockedTarget()) {
-            // Subsequent taps: skip raycast aim, go straight into rhythm→chop.
-            setPhase('power');
-            doChop();
-          } else {
-            aimAt(cx, cy);
-          }
+          // Click-at-hit arms the rhythm bar (camera facing already locked or set here).
+          aimAt(cx, cy);
         }
       }
       pointerId = null;
@@ -514,9 +564,41 @@ async function boot(): Promise<void> {
       lockedCleaveNormal
         ? { x: lockedCleaveNormal.x, z: lockedCleaveNormal.z }
         : null,
+    getOrientSuccessCount: () => orientSuccessCount,
+    getOrientFamilyIndex: () => orientFamilyIndex,
+    chopsBeforeRotate: () => CHOPS_BEFORE_ORIENT_ROTATE,
     armLocked: () => armLockedTarget(),
+    /** Pick next splittable piece and enter power phase (demo-friendly). */
+    aimNext: () => {
+      if (roundFinishing || chopping) return false;
+      if (!lockedCleaveNormal) lockCleaveFromCamera();
+      if (!armLockedTarget()) return false;
+      setPhase('power');
+      return true;
+    },
+    lockCleaveFromCamera: () => {
+      const n = lockCleaveFromCamera();
+      return { x: n.x, z: n.z };
+    },
     fragmentCount: () => logScene.fracture.fragments.length,
     splittableCount: () => logScene.fracture.fragments.filter((f) => f.splittable).length,
+    isRecycling: () => logScene.isRecycling(),
+    /** Demo/test: force scatter→ring even if pieces remain. */
+    forceFinish: () => {
+      if (roundFinishing) return true;
+      roundFinishing = true;
+      lockedCleaveNormal = null;
+      orientSuccessCount = 0;
+      resultEl.textContent = '收柴入库';
+      resultEl.className = 'result sweet';
+      phaseHint.classList.add('is-gone');
+      logScene.scatterAndRecycle();
+      window.setTimeout(() => {
+        roundFinishing = false;
+        resetRound({ keepPile: true });
+      }, 2200);
+      return true;
+    },
     /** Stump-piece horizontal centers + pairwise gap (for bounce/offset checks). */
     stumpGap: () => {
       const stump = logScene.fracture.fragments.filter((f) => f.onStump && f.mesh.visible);
