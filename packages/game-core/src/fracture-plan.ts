@@ -61,6 +61,35 @@ export const BOUNCE_YAW_JITTER_DEG = 1.5;
 /** Mid-bounce tilt (degrees) — reference stays upright; keep near-zero tip. */
 export const BOUNCE_TILT_DEG = 2;
 
+/**
+ * Scripted firewood tip-drop (logic feel of screen.toys chips leaving the stump).
+ * Prefer a short tip/slide onto nearby yard ground over cannon-es impulse arcs.
+ */
+/** Tip-over duration (ms) — longer than stump bounce so the tip reads clearly. */
+export const TIP_DROP_DURATION_MS = 340;
+/** Extra random duration jitter (ms). */
+export const TIP_DROP_DURATION_JIT_MS = 90;
+/** Peak tip angle (degrees) — fall onto a side, not a full tumble. */
+export const TIP_DROP_ANGLE_DEG = 78;
+export const TIP_DROP_ANGLE_JIT_DEG = 14;
+/** Tiny yaw while tipping (±degrees). */
+export const TIP_DROP_YAW_JIT_DEG = 8;
+/** Soft mid-arc lift (metres) — barely leaves the stump lip, no pop. */
+export const TIP_DROP_ARC_HEIGHT = 0.028;
+/**
+ * Rest radial band beside the stump (metres from origin).
+ * Stump visual R≈0.32 / collider ≥0.35 — keep chips off the top face.
+ */
+export const TIP_DROP_REST_RADIAL = 0.58;
+export const TIP_DROP_REST_RADIAL_JIT = 0.12;
+/** Round-end scatter rests a bit farther out than single-chip tip-drop. */
+export const TIP_DROP_SCATTER_RADIAL = 0.72;
+export const TIP_DROP_SCATTER_RADIAL_JIT = 0.18;
+/** Ground clearance for a tipped chip center (added to half-thickness). */
+export const TIP_DROP_GROUND_PAD = 0.02;
+/** How long soft physics may run after the scripted tip settles (ms). */
+export const TIP_DROP_POST_SETTLE_MS = 900;
+
 export interface FracturePlan {
   /** 0 = do not fracture (too_light). Target piece budget for cleave recursion. */
   fragmentCount: number;
@@ -411,6 +440,87 @@ export function lateralOffsetFromDiameter(diameter: number, gapFrac: number): nu
   const d = Math.max(0.05, diameter);
   const frac = Math.max(0, gapFrac);
   return (frac * d) / 2;
+}
+
+/** Smoothstep ease in [0,1] — shared by stump bounce + firewood tip-drop. */
+export function easeSmoothstep(u: number): number {
+  const t = Math.min(1, Math.max(0, u));
+  return t * t * (3 - 2 * t);
+}
+
+/** Normalize an XZ push hint; fall back to a unit vector if degenerate. */
+export function normalizePushXZ(
+  hintX: number,
+  hintZ: number,
+  fallbackAngle = 0,
+): { ox: number; oz: number } {
+  const len = Math.hypot(hintX, hintZ);
+  if (len < 1e-4) {
+    return { ox: Math.cos(fallbackAngle), oz: Math.sin(fallbackAngle) };
+  }
+  return { ox: hintX / len, oz: hintZ / len };
+}
+
+/**
+ * Ground rest pose for a tip-dropped firewood chip beside the stump.
+ * Continuous from the current stump pose — no radial teleport “pop”.
+ */
+export function tipDropRestPose(input: {
+  fromX: number;
+  fromZ: number;
+  dirX: number;
+  dirZ: number;
+  /** Half-extent of the thinnest axis after tip (metres). */
+  restHalfHeight: number;
+  restRadial: number;
+  restRadialJit?: number;
+  /** Unit random in [0,1) for radial jitter (injectable for tests). */
+  rnd?: number;
+  groundPad?: number;
+}): { toX: number; toY: number; toZ: number; ox: number; oz: number; restRadial: number } {
+  const { ox, oz } = normalizePushXZ(input.dirX, input.dirZ);
+  const jit = Math.max(0, input.restRadialJit ?? 0);
+  const rnd = input.rnd ?? 0.5;
+  const restRadial = Math.max(0.42, input.restRadial + rnd * jit);
+  // Prefer sliding farther out from current radial so the path never pulls inward.
+  const fromR = Math.hypot(input.fromX, input.fromZ);
+  const targetR = Math.max(restRadial, fromR + 0.08);
+  const pad = input.groundPad ?? TIP_DROP_GROUND_PAD;
+  const toY = Math.max(0.04, input.restHalfHeight + pad);
+  return {
+    toX: ox * targetR,
+    toY,
+    toZ: oz * targetR,
+    ox,
+    oz,
+    restRadial: targetR,
+  };
+}
+
+/**
+ * Sample a scripted tip-drop pose at progress u∈[0,1].
+ * Lateral slide + soft arc + outward tip (no abrupt velocity set).
+ */
+export function sampleTipDropPose(input: {
+  u: number;
+  fromX: number;
+  fromY: number;
+  fromZ: number;
+  toX: number;
+  toY: number;
+  toZ: number;
+  tipRad: number;
+  arcHeight?: number;
+}): { x: number; y: number; z: number; tipRad: number; ease: number } {
+  const ease = easeSmoothstep(input.u);
+  const arc = (input.arcHeight ?? TIP_DROP_ARC_HEIGHT) * Math.sin(Math.PI * Math.min(1, Math.max(0, input.u)));
+  return {
+    x: input.fromX + (input.toX - input.fromX) * ease,
+    y: input.fromY + (input.toY - input.fromY) * ease + arc,
+    z: input.fromZ + (input.toZ - input.fromZ) * ease,
+    tipRad: input.tipRad * ease,
+    ease,
+  };
 }
 
 function clampInt(n: number, lo: number, hi: number): number {

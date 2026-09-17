@@ -13,7 +13,21 @@ import {
   isTooThinToSplit,
   MAX_LIVE_FRAGMENTS,
   MIN_RECHOP_DIAGONAL,
+  sampleTipDropPose,
   thicknessInchesAlong,
+  tipDropRestPose,
+  TIP_DROP_ANGLE_DEG,
+  TIP_DROP_ANGLE_JIT_DEG,
+  TIP_DROP_ARC_HEIGHT,
+  TIP_DROP_DURATION_JIT_MS,
+  TIP_DROP_DURATION_MS,
+  TIP_DROP_GROUND_PAD,
+  TIP_DROP_POST_SETTLE_MS,
+  TIP_DROP_REST_RADIAL,
+  TIP_DROP_REST_RADIAL_JIT,
+  TIP_DROP_SCATTER_RADIAL,
+  TIP_DROP_SCATTER_RADIAL_JIT,
+  TIP_DROP_YAW_JIT_DEG,
   TINY_CHIP_DIAGONAL,
   volumeInchesFromBBox,
   type FracturePlan,
@@ -45,6 +59,27 @@ export interface BounceAnim {
   baseQuat: THREE.Quaternion;
 }
 
+/**
+ * Scripted firewood tip-drop — short tip/slide onto nearby yard ground
+ * (reference feel), not a cannon-es impulse arc. Optional soft physics after.
+ */
+export interface TipDropAnim {
+  pushX: number;
+  pushZ: number;
+  startAt: number;
+  durationMs: number;
+  fromX: number;
+  fromY: number;
+  fromZ: number;
+  toX: number;
+  toY: number;
+  toZ: number;
+  tipRad: number;
+  yawRad: number;
+  arcHeight: number;
+  baseQuat: THREE.Quaternion;
+}
+
 export interface PhysFragment {
   mesh: DestructibleMesh;
   body: CANNON.Body;
@@ -57,6 +92,8 @@ export interface PhysFragment {
   onStump: boolean;
   /** Scripted bounce (non-firewood stump pieces). */
   bounce?: BounceAnim;
+  /** Scripted tip/slide onto yard ground (classified firewood). */
+  tipDrop?: TipDropAnim;
   /** Scripted slide into the side circle pile after round completion. */
   recycle?: {
     startAt: number;
@@ -91,7 +128,7 @@ export interface FractureWorld {
   /** Remove stump/splittable pieces; keep ring-pile chips. */
   clearStumpPieces(): void;
   prune(): void;
-  /** Knock stump pieces off as dynamic chips (round complete). */
+  /** Knock stump pieces off via scripted tip-drop (round complete). */
   scatterToGround(): void;
   /** After scatter, slide pieces into a ring pile around the scene. */
   recycleToRing(opts?: { radius?: number; groundY?: number }): void;
@@ -115,8 +152,8 @@ export interface FractureWorld {
   /** Volume/aspect firewood gate for a live mesh (same helpers as post-split). */
   isFirewoodMesh(mesh: THREE.Mesh): boolean;
   /**
-   * Mark a stump piece (or whole log) as firewood and toss it to the ground
-   * with the same outward impulse path used for classified chips.
+   * Mark a stump piece (or whole log) as firewood and tip-drop it onto nearby
+   * yard ground with the same scripted path used for classified chips.
    */
   tossAsFirewood(mesh: THREE.Mesh, opts?: { planeNormal?: THREE.Vector3 }): boolean;
   disposeMesh(mesh: THREE.Object3D, disposeMaterials?: boolean): void;
@@ -198,25 +235,10 @@ export function createFractureWorld(
   let stumpSupportY = opts?.stumpSupportY ?? 0.42;
 
   /**
-   * Firewood toss feel — soft tip / short-arc drop beside the stump
-   * (reference screen.toys/firewood), not a snappy “pop” across the yard.
-   *
-   * Before (#16 escape-top): HX 2.05–2.90, VY 2.05–2.75, CLEAR_R 0.48 → radial≈1.6–2.3
-   * After (soft drop):       HX 0.50–0.72, VY 0.42–0.64, CLEAR_R 0.42 → near-rim / inner yard
-   * Still starts just past the stump collider so chips don’t park on the top.
+   * Firewood exit feel — scripted tip/slide onto nearby yard ground
+   * (reference screen.toys/firewood), not a box-impulse “gamey” toss.
+   * Constants live in @firewood/game-core (TIP_DROP_*).
    */
-  const FIREWOOD_TOSS_SETTLE_MS = 1600;
-  /** Slight lift so the chip isn’t jammed into the stump-top box. */
-  const FIREWOOD_TOSS_LIFT = 0.06;
-  /** Radial clear past stump top before impulse (visual R≈0.32, collider ≥0.35). */
-  const FIREWOOD_TOSS_CLEAR_R = 0.42;
-  const FIREWOOD_TOSS_HX = 0.5;
-  const FIREWOOD_TOSS_HX_JIT = 0.22;
-  const FIREWOOD_TOSS_VY = 0.42;
-  const FIREWOOD_TOSS_VY_JIT = 0.22;
-  /** Tip/roll rate (rad/s) — outward tip, not random cannon spin. */
-  const FIREWOOD_TOSS_TIP = 0.9;
-  const FIREWOOD_TOSS_TIP_JIT = 0.55;
 
   function fitStumpCollider(next: { topY: number; height: number; radius: number }): void {
     const height = Math.max(0.28, next.height);
@@ -810,6 +832,57 @@ export function createFractureWorld(
     return true;
   }
 
+  function applyTipDropPose(f: PhysFragment, now: number): boolean {
+    const t = f.tipDrop;
+    if (!t) return false;
+    const localT = now - t.startAt;
+    if (localT < 0) {
+      f.body.position.set(t.fromX, t.fromY, t.fromZ);
+      f.mesh.position.set(t.fromX, t.fromY, t.fromZ);
+      f.mesh.quaternion.copy(t.baseQuat);
+      f.body.quaternion.set(t.baseQuat.x, t.baseQuat.y, t.baseQuat.z, t.baseQuat.w);
+      return true;
+    }
+    const u = Math.min(1, localT / Math.max(1, t.durationMs));
+    const sample = sampleTipDropPose({
+      u,
+      fromX: t.fromX,
+      fromY: t.fromY,
+      fromZ: t.fromZ,
+      toX: t.toX,
+      toY: t.toY,
+      toZ: t.toZ,
+      tipRad: t.tipRad,
+      arcHeight: t.arcHeight,
+    });
+
+    _tiltAxis.set(-t.pushZ, 0, t.pushX);
+    if (_tiltAxis.lengthSq() < 1e-8) _tiltAxis.set(1, 0, 0);
+    else _tiltAxis.normalize();
+    _tiltQ.setFromAxisAngle(_tiltAxis, sample.tipRad);
+    _yawQ.setFromAxisAngle(up, t.yawRad * sample.ease);
+    _outQ.copy(t.baseQuat).multiply(_yawQ).multiply(_tiltQ);
+
+    f.body.position.set(sample.x, sample.y, sample.z);
+    f.mesh.position.set(sample.x, sample.y, sample.z);
+    f.mesh.quaternion.copy(_outQ);
+    f.body.quaternion.set(_outQ.x, _outQ.y, _outQ.z, _outQ.w);
+
+    if (u >= 1) {
+      f.body.position.set(t.toX, t.toY, t.toZ);
+      f.mesh.position.set(t.toX, t.toY, t.toZ);
+      _yawQ.setFromAxisAngle(up, t.yawRad);
+      _tiltQ.setFromAxisAngle(_tiltAxis, t.tipRad);
+      _outQ.copy(t.baseQuat).multiply(_yawQ).multiply(_tiltQ);
+      f.mesh.quaternion.copy(_outQ);
+      f.body.quaternion.set(_outQ.x, _outQ.y, _outQ.z, _outQ.w);
+      f.tipDrop = undefined;
+      // Soft handoff: light dynamic body so chips can nest into a pile.
+      finishTipDropHandoff(f);
+    }
+    return true;
+  }
+
   /** Horizontal diameter of the piece about to be cleaved (pre-slice). */
   function meshDiameterXZ(mesh: THREE.Object3D): number {
     mesh.updateMatrixWorld(true);
@@ -853,7 +926,8 @@ export function createFractureWorld(
       const { firewood, volumeInches } = classifyFirewood(fragment, size0);
       const onStump = !firewood;
 
-      const body = makeBodyFromMesh(fragment, plan.messy ? 1.15 : 1.35, onStump);
+      // Both stump bounce and firewood tip-drop are scripted — start STATIC.
+      const body = makeBodyFromMesh(fragment, plan.messy ? 1.15 : 1.35, true);
 
       // Prefer ±cleave normal so halves mirror-slide apart (reference upright 错开).
       // Fall back to impact→centroid if the piece sits on the plane.
@@ -922,8 +996,12 @@ export function createFractureWorld(
         generation: childGen,
         splittable: onStump && isRechopWorthy(diag, childGen, volumeInches),
         bornAt: now,
-        // Firewood needs a longer free-flight window than stump bounce settle.
-        settleUntil: now + (onStump ? settleMs : FIREWOOD_TOSS_SETTLE_MS),
+        // Tip-drop duration + short soft-physics window after handoff.
+        settleUntil:
+          now +
+          (onStump
+            ? settleMs
+            : TIP_DROP_DURATION_MS + TIP_DROP_DURATION_JIT_MS + TIP_DROP_POST_SETTLE_MS),
         onStump,
         bounce: onStump
           ? {
@@ -947,8 +1025,8 @@ export function createFractureWorld(
       };
 
       if (!onStump) {
-        // Classified firewood: clear stump top + soft tip/drop beside the block.
-        applyFirewoodTossImpulse(entry, planeNormal, { x: pushX, z: pushZ });
+        // Classified firewood: scripted tip/slide onto nearby yard ground.
+        beginFirewoodTipDrop(entry, planeNormal, { x: pushX, z: pushZ });
       }
 
       // Record intended final for safety settle.
@@ -1056,6 +1134,7 @@ export function createFractureWorld(
       }
 
       if (applyBouncePose(f, now)) continue;
+      if (applyTipDropPose(f, now)) continue;
 
       if (f.body.type === CANNON.Body.STATIC) continue;
       if (now < f.settleUntil) continue;
@@ -1074,7 +1153,7 @@ export function createFractureWorld(
 
   function sync(): void {
     for (const f of fragments) {
-      if (f.bounce || f.recycle) continue; // scripted pose owns this frame
+      if (f.bounce || f.tipDrop || f.recycle) continue; // scripted pose owns this frame
       f.mesh.position.set(f.body.position.x, f.body.position.y, f.body.position.z);
       f.mesh.quaternion.set(
         f.body.quaternion.x,
@@ -1085,7 +1164,7 @@ export function createFractureWorld(
     }
   }
 
-  /** Rebuild a static stump body as dynamic (shared by scatter + single toss). */
+  /** Rebuild a static stump body as dynamic (shared by tip-drop handoff + scatter). */
   function ensureDynamicBody(f: PhysFragment): void {
     if (f.body.type !== CANNON.Body.STATIC && f.body.mass !== 0) return;
     const pos = f.body.position.clone();
@@ -1106,91 +1185,108 @@ export function createFractureWorld(
       material: woodMat,
       position: pos,
       quaternion: quat,
-      linearDamping: 0.38,
-      angularDamping: 0.48,
+      // Soft wood-on-dirt after scripted tip — high damping, low bounce.
+      linearDamping: 0.55,
+      angularDamping: 0.62,
       allowSleep: true,
     });
     world.addBody(f.body);
   }
 
-  /**
-   * Lift + radial nudge so a firewood chip starts clear of the stump top
-   * collider before the outward impulse runs.
-   */
-  function clearStumpForToss(
-    f: PhysFragment,
-    hintX?: number,
-    hintZ?: number,
-  ): { ox: number; oz: number } {
-    f.mesh.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(f.mesh);
-    const targetMinY = stumpSupportY + FIREWOOD_TOSS_LIFT;
-    const lift = Math.max(0, targetMinY - box.min.y);
-    if (lift > 0) {
-      f.body.position.y += lift;
-      f.mesh.position.y = f.body.position.y;
+  function freezeForScriptedPose(f: PhysFragment): void {
+    f.body.velocity.set(0, 0, 0);
+    f.body.angularVelocity.set(0, 0, 0);
+    if (f.body.type !== CANNON.Body.STATIC) {
+      f.body.type = CANNON.Body.STATIC;
+      f.body.mass = 0;
+      f.body.updateMassProperties();
     }
-
-    let ox = hintX ?? f.body.position.x;
-    let oz = hintZ ?? f.body.position.z;
-    let len = Math.hypot(ox, oz);
-    if (len < 1e-4) {
-      const ang = Math.random() * Math.PI * 2;
-      ox = Math.cos(ang);
-      oz = Math.sin(ang);
-      len = 1;
-    } else {
-      ox /= len;
-      oz /= len;
-    }
-
-    const radial = Math.hypot(f.body.position.x, f.body.position.z);
-    if (radial < FIREWOOD_TOSS_CLEAR_R) {
-      const need = FIREWOOD_TOSS_CLEAR_R - radial;
-      f.body.position.x += ox * need;
-      f.body.position.z += oz * need;
-      f.mesh.position.x = f.body.position.x;
-      f.mesh.position.z = f.body.position.z;
-    }
-    return { ox, oz };
   }
 
-  /** Soft tip / short-arc drop beside the stump (post-split + option-A tossAsFirewood). */
-  function applyFirewoodTossImpulse(
-    f: PhysFragment,
-    planeNormal?: THREE.Vector3,
-    pushHint?: { x: number; z: number },
-  ): void {
-    let { ox, oz } = clearStumpForToss(f, pushHint?.x, pushHint?.z);
-    if (planeNormal) {
-      const n = planeNormal.clone().setY(0);
-      if (n.lengthSq() > 1e-8) {
-        n.normalize();
-        const side = Math.sign(ox * n.x + oz * n.z) || 1;
-        ox = n.x * side;
-        oz = n.z * side;
-      }
-    }
-    const hx = FIREWOOD_TOSS_HX + Math.random() * FIREWOOD_TOSS_HX_JIT;
-    const vy = FIREWOOD_TOSS_VY + Math.random() * FIREWOOD_TOSS_VY_JIT;
-    f.body.velocity.set(
-      ox * hx + (Math.random() - 0.5) * 0.18,
-      vy,
-      oz * hx + (Math.random() - 0.5) * 0.18,
-    );
-    // Tip outward (ω ≈ tip * up×outward) — gentle roll-off, not a spin burst.
-    const tip = FIREWOOD_TOSS_TIP + Math.random() * FIREWOOD_TOSS_TIP_JIT;
-    f.body.angularVelocity.set(
-      -oz * tip + (Math.random() - 0.5) * 0.5,
-      (Math.random() - 0.5) * 0.7,
-      ox * tip + (Math.random() - 0.5) * 0.5,
-    );
+  function finishTipDropHandoff(f: PhysFragment): void {
+    ensureDynamicBody(f);
+    f.body.velocity.set(0, 0, 0);
+    f.body.angularVelocity.set(0, 0, 0);
+    f.settleUntil = performance.now() + TIP_DROP_POST_SETTLE_MS;
     f.body.wakeUp();
   }
 
+  /** Rest half-height after tipping onto the thinnest axis. */
+  function tipRestHalfHeight(mesh: THREE.Mesh): number {
+    mesh.updateMatrixWorld(true);
+    const size = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3());
+    return Math.max(0.03, Math.min(size.x, size.y, size.z) * 0.45);
+  }
+
   /**
-   * Convert one stump piece (or the still-whole log) into a dynamic firewood
-   * chip and toss it outward — option A bridge when too-thin + finished.
+   * Scripted tip/slide onto nearby yard ground (post-split + option-A + scatter).
+   * Continuous from the current stump pose — no radial teleport clear.
+   */
+  function beginFirewoodTipDrop(
+    f: PhysFragment,
+    planeNormal?: THREE.Vector3,
+    pushHint?: { x: number; z: number },
+    opts?: { scatter?: boolean },
+  ): void {
+    freezeForScriptedPose(f);
+    f.bounce = undefined;
+    f.recycle = undefined;
+    f.onStump = false;
+    f.splittable = false;
+
+    let dirX = pushHint?.x ?? f.body.position.x;
+    let dirZ = pushHint?.z ?? f.body.position.z;
+    if (planeNormal) {
+      const nx = planeNormal.x;
+      const nz = planeNormal.z;
+      const nLen = Math.hypot(nx, nz);
+      if (nLen > 1e-8) {
+        const side = Math.sign(dirX * (nx / nLen) + dirZ * (nz / nLen)) || 1;
+        dirX = (nx / nLen) * side;
+        dirZ = (nz / nLen) * side;
+      }
+    }
+
+    const rest = tipDropRestPose({
+      fromX: f.body.position.x,
+      fromZ: f.body.position.z,
+      dirX,
+      dirZ,
+      restHalfHeight: tipRestHalfHeight(f.mesh),
+      restRadial: opts?.scatter ? TIP_DROP_SCATTER_RADIAL : TIP_DROP_REST_RADIAL,
+      restRadialJit: opts?.scatter ? TIP_DROP_SCATTER_RADIAL_JIT : TIP_DROP_REST_RADIAL_JIT,
+      rnd: Math.random(),
+      groundPad: TIP_DROP_GROUND_PAD,
+    });
+
+    const tipDeg = TIP_DROP_ANGLE_DEG + Math.random() * TIP_DROP_ANGLE_JIT_DEG;
+    const yawRad =
+      ((Math.random() * 2 - 1) * TIP_DROP_YAW_JIT_DEG * Math.PI) / 180;
+    const now = performance.now();
+    const durationMs = TIP_DROP_DURATION_MS + Math.random() * TIP_DROP_DURATION_JIT_MS;
+
+    f.tipDrop = {
+      pushX: rest.ox,
+      pushZ: rest.oz,
+      startAt: now,
+      durationMs,
+      fromX: f.body.position.x,
+      fromY: f.body.position.y,
+      fromZ: f.body.position.z,
+      toX: rest.toX,
+      toY: rest.toY,
+      toZ: rest.toZ,
+      tipRad: (tipDeg * Math.PI) / 180,
+      yawRad,
+      arcHeight: TIP_DROP_ARC_HEIGHT,
+      baseQuat: f.mesh.quaternion.clone(),
+    };
+    f.settleUntil = now + durationMs + TIP_DROP_POST_SETTLE_MS;
+  }
+
+  /**
+   * Convert one stump piece (or the still-whole log) into firewood and tip-drop
+   * onto nearby ground — option A bridge when too-thin + finished.
    */
   function tossAsFirewood(
     mesh: THREE.Mesh,
@@ -1199,9 +1295,9 @@ export function createFractureWorld(
     const now = performance.now();
     let f = fragments.find((x) => x.mesh === mesh);
     if (!f) {
-      // Whole log / unregistered mesh: register as a dynamic firewood chip.
+      // Whole log / unregistered mesh: register then tip-drop.
       if (!(mesh as DestructibleMesh).geometry) return false;
-      const body = makeBodyFromMesh(mesh, 1.2, false);
+      const body = makeBodyFromMesh(mesh, 1.2, true);
       world.addBody(body);
       f = {
         mesh: mesh as DestructibleMesh,
@@ -1209,7 +1305,7 @@ export function createFractureWorld(
         generation: (mesh.userData.generation as number) ?? 0,
         splittable: false,
         bornAt: now,
-        settleUntil: now + FIREWOOD_TOSS_SETTLE_MS,
+        settleUntil: now + TIP_DROP_DURATION_MS + TIP_DROP_POST_SETTLE_MS,
         onStump: false,
       };
       mesh.userData.phys = f;
@@ -1220,13 +1316,12 @@ export function createFractureWorld(
       f.recycle = undefined;
       f.onStump = false;
       f.splittable = false;
-      f.settleUntil = now + FIREWOOD_TOSS_SETTLE_MS;
-      ensureDynamicBody(f);
     }
-    applyFirewoodTossImpulse(f, opts?.planeNormal);
-    console.info('[firewood] tossAsFirewood', {
+    beginFirewoodTipDrop(f, opts?.planeNormal);
+    console.info('[firewood] tossAsFirewood tipDrop', {
       gen: f.generation,
-      pos: [f.body.position.x, f.body.position.y, f.body.position.z],
+      from: [f.tipDrop?.fromX, f.tipDrop?.fromY, f.tipDrop?.fromZ],
+      to: [f.tipDrop?.toX, f.tipDrop?.toY, f.tipDrop?.toZ],
     });
     return true;
   }
@@ -1237,31 +1332,10 @@ export function createFractureWorld(
     return classifyFirewood(mesh, size).firewood;
   }
 
-  /** Convert stump halves to dynamic bodies and fling them outward onto the ground. */
+  /** Convert stump halves to tip-drop firewood onto the yard (round complete). */
   function scatterToGround(): void {
-    const now = performance.now();
     for (const f of fragments) {
-      f.bounce = undefined;
-      f.recycle = undefined;
-      f.onStump = false;
-      f.splittable = false;
-      f.settleUntil = now + FIREWOOD_TOSS_SETTLE_MS;
-      ensureDynamicBody(f);
-      // Round-end: same soft clear + short drop, slightly wider than chip toss.
-      const { ox, oz } = clearStumpForToss(f);
-      const hx = 0.75 + Math.random() * 0.35;
-      const tip = FIREWOOD_TOSS_TIP + Math.random() * FIREWOOD_TOSS_TIP_JIT;
-      f.body.velocity.set(
-        ox * hx + (Math.random() - 0.5) * 0.22,
-        FIREWOOD_TOSS_VY + Math.random() * FIREWOOD_TOSS_VY_JIT,
-        oz * hx + (Math.random() - 0.5) * 0.22,
-      );
-      f.body.angularVelocity.set(
-        -oz * tip + (Math.random() - 0.5) * 0.5,
-        (Math.random() - 0.5) * 0.7,
-        ox * tip + (Math.random() - 0.5) * 0.5,
-      );
-      f.body.wakeUp();
+      beginFirewoodTipDrop(f, undefined, undefined, { scatter: true });
     }
   }
 
@@ -1274,6 +1348,7 @@ export function createFractureWorld(
     for (let i = 0; i < fragments.length; i++) {
       const f = fragments[i]!;
       f.bounce = undefined;
+      f.tipDrop = undefined;
       f.onStump = false;
       f.splittable = false;
       // Freeze physics — recycle animator owns pose.
