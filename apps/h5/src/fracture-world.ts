@@ -197,6 +197,20 @@ export function createFractureWorld(
   /** World Y of the chopping-block top — measured from the visual stump mesh. */
   let stumpSupportY = opts?.stumpSupportY ?? 0.42;
 
+  /**
+   * Firewood toss feel — chips must clear the stump top and settle on the
+   * surrounding yard ground (reference screen.toys/firewood), not rest on the block.
+   * Start just past the stump collider, then a moderate outward arc into the yard ring.
+   */
+  const FIREWOOD_TOSS_SETTLE_MS = 1600;
+  const FIREWOOD_TOSS_LIFT = 0.14;
+  /** Radial clear past stump top before applying impulse (visual R≈0.32, collider ≥0.35). */
+  const FIREWOOD_TOSS_CLEAR_R = 0.48;
+  const FIREWOOD_TOSS_HX = 2.05;
+  const FIREWOOD_TOSS_HX_JIT = 0.85;
+  const FIREWOOD_TOSS_VY = 2.05;
+  const FIREWOOD_TOSS_VY_JIT = 0.7;
+
   function fitStumpCollider(next: { topY: number; height: number; radius: number }): void {
     const height = Math.max(0.28, next.height);
     const radius = Math.max(0.35, next.radius);
@@ -348,8 +362,9 @@ export function createFractureWorld(
         mesh.quaternion.z,
         mesh.quaternion.w,
       ),
-      linearDamping: onStump ? 1 : 0.78,
-      angularDamping: onStump ? 1 : 0.88,
+      // Firewood needs lower damping so the toss arc can clear the stump.
+      linearDamping: onStump ? 1 : 0.38,
+      angularDamping: onStump ? 1 : 0.48,
       allowSleep: true,
       sleepSpeedLimit: 0.08,
       sleepTimeLimit: 0.12,
@@ -880,21 +895,7 @@ export function createFractureWorld(
       body.velocity.set(0, 0, 0);
       body.angularVelocity.set(0, 0, 0);
 
-      if (!onStump) {
-        // Firewood chips: light physics toss toward a side pile (not main halves).
-        const tossSide =
-          Math.sign(pushX * planeNormal.x + pushZ * planeNormal.z) || (i % 2 === 0 ? 1 : -1);
-        body.velocity.set(
-          pushX * (1.2 + Math.random() * 0.6) + planeNormal.x * tossSide * 0.4,
-          1.4 + Math.random() * 0.8,
-          pushZ * (1.2 + Math.random() * 0.6) + planeNormal.z * tossSide * 0.4,
-        );
-        body.angularVelocity.set(
-          (Math.random() - 0.5) * 4,
-          (Math.random() - 0.5) * 3,
-          (Math.random() - 0.5) * 4,
-        );
-      } else {
+      if (onStump) {
         // Apply the designed lateral 错开 immediately so the gap is correct even
         // if animation frames are skipped; bounce still plays closed→open + pop.
         body.position.set(finalX, baseY, finalZ);
@@ -914,7 +915,8 @@ export function createFractureWorld(
         generation: childGen,
         splittable: onStump && isRechopWorthy(diag, childGen, volumeInches),
         bornAt: now,
-        settleUntil: now + settleMs,
+        // Firewood needs a longer free-flight window than stump bounce settle.
+        settleUntil: now + (onStump ? settleMs : FIREWOOD_TOSS_SETTLE_MS),
         onStump,
         bounce: onStump
           ? {
@@ -936,6 +938,12 @@ export function createFractureWorld(
             }
           : undefined,
       };
+
+      if (!onStump) {
+        // Classified firewood: clear stump top + outward fling onto yard ground.
+        applyFirewoodTossImpulse(entry, planeNormal, { x: pushX, z: pushZ });
+      }
+
       // Record intended final for safety settle.
       fragment.userData.finalXZ = { x: finalX, z: finalZ };
       fragment.userData.phys = entry;
@@ -1047,15 +1055,12 @@ export function createFractureWorld(
       if (f.body.sleepState === CANNON.Body.SLEEPING) continue;
       const speed = f.body.velocity.length();
       const spin = f.body.angularVelocity.length();
-      if (speed < 0.55 && spin < 1.2) {
+      // Firewood chips: only soft-sleep when nearly stopped — never hard-dampen
+      // mid-flight (old ×0.35 + vy cap parked chips on the stump top).
+      if (speed < 0.4 && spin < 0.9) {
         f.body.velocity.set(0, 0, 0);
         f.body.angularVelocity.set(0, 0, 0);
         f.body.sleep();
-      } else {
-        f.body.velocity.x *= 0.35;
-        f.body.velocity.z *= 0.35;
-        f.body.velocity.y = Math.min(f.body.velocity.y, 0.05);
-        f.body.angularVelocity.scale(0.25);
       }
     }
   }
@@ -1094,23 +1099,62 @@ export function createFractureWorld(
       material: woodMat,
       position: pos,
       quaternion: quat,
-      linearDamping: 0.55,
-      angularDamping: 0.62,
+      linearDamping: 0.38,
+      angularDamping: 0.48,
       allowSleep: true,
     });
     world.addBody(f.body);
   }
 
-  /** Apply outward firewood-chip impulse (matches post-split toss feel). */
+  /**
+   * Lift + radial nudge so a firewood chip starts clear of the stump top
+   * collider before the outward impulse runs.
+   */
+  function clearStumpForToss(
+    f: PhysFragment,
+    hintX?: number,
+    hintZ?: number,
+  ): { ox: number; oz: number } {
+    f.mesh.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(f.mesh);
+    const targetMinY = stumpSupportY + FIREWOOD_TOSS_LIFT;
+    const lift = Math.max(0, targetMinY - box.min.y);
+    if (lift > 0) {
+      f.body.position.y += lift;
+      f.mesh.position.y = f.body.position.y;
+    }
+
+    let ox = hintX ?? f.body.position.x;
+    let oz = hintZ ?? f.body.position.z;
+    let len = Math.hypot(ox, oz);
+    if (len < 1e-4) {
+      const ang = Math.random() * Math.PI * 2;
+      ox = Math.cos(ang);
+      oz = Math.sin(ang);
+      len = 1;
+    } else {
+      ox /= len;
+      oz /= len;
+    }
+
+    const radial = Math.hypot(f.body.position.x, f.body.position.z);
+    if (radial < FIREWOOD_TOSS_CLEAR_R) {
+      const need = FIREWOOD_TOSS_CLEAR_R - radial;
+      f.body.position.x += ox * need;
+      f.body.position.z += oz * need;
+      f.mesh.position.x = f.body.position.x;
+      f.mesh.position.z = f.body.position.z;
+    }
+    return { ox, oz };
+  }
+
+  /** Apply outward firewood-chip impulse (post-split + option-A tossAsFirewood). */
   function applyFirewoodTossImpulse(
     f: PhysFragment,
     planeNormal?: THREE.Vector3,
+    pushHint?: { x: number; z: number },
   ): void {
-    const px = f.body.position.x;
-    const pz = f.body.position.z;
-    const radialLen = Math.hypot(px, pz) || 1;
-    let ox = px / radialLen;
-    let oz = pz / radialLen;
+    let { ox, oz } = clearStumpForToss(f, pushHint?.x, pushHint?.z);
     if (planeNormal) {
       const n = planeNormal.clone().setY(0);
       if (n.lengthSq() > 1e-8) {
@@ -1120,15 +1164,17 @@ export function createFractureWorld(
         oz = n.z * side;
       }
     }
+    const hx = FIREWOOD_TOSS_HX + Math.random() * FIREWOOD_TOSS_HX_JIT;
+    const vy = FIREWOOD_TOSS_VY + Math.random() * FIREWOOD_TOSS_VY_JIT;
     f.body.velocity.set(
-      ox * (1.2 + Math.random() * 0.6) + (Math.random() - 0.5) * 0.35,
-      1.4 + Math.random() * 0.8,
-      oz * (1.2 + Math.random() * 0.6) + (Math.random() - 0.5) * 0.35,
+      ox * hx + (Math.random() - 0.5) * 0.45,
+      vy,
+      oz * hx + (Math.random() - 0.5) * 0.45,
     );
     f.body.angularVelocity.set(
+      (Math.random() - 0.5) * 5,
       (Math.random() - 0.5) * 4,
-      (Math.random() - 0.5) * 3,
-      (Math.random() - 0.5) * 4,
+      (Math.random() - 0.5) * 5,
     );
     f.body.wakeUp();
   }
@@ -1154,7 +1200,7 @@ export function createFractureWorld(
         generation: (mesh.userData.generation as number) ?? 0,
         splittable: false,
         bornAt: now,
-        settleUntil: now + 900,
+        settleUntil: now + FIREWOOD_TOSS_SETTLE_MS,
         onStump: false,
       };
       mesh.userData.phys = f;
@@ -1165,7 +1211,7 @@ export function createFractureWorld(
       f.recycle = undefined;
       f.onStump = false;
       f.splittable = false;
-      f.settleUntil = now + 900;
+      f.settleUntil = now + FIREWOOD_TOSS_SETTLE_MS;
       ensureDynamicBody(f);
     }
     applyFirewoodTossImpulse(f, opts?.planeNormal);
@@ -1190,18 +1236,15 @@ export function createFractureWorld(
       f.recycle = undefined;
       f.onStump = false;
       f.splittable = false;
-      f.settleUntil = now + 900;
+      f.settleUntil = now + FIREWOOD_TOSS_SETTLE_MS;
       ensureDynamicBody(f);
-      // Round-end scatter uses a slightly stronger outward fling than chip toss.
-      const px = f.body.position.x;
-      const pz = f.body.position.z;
-      const len = Math.hypot(px, pz) || 1;
-      const ox = px / len;
-      const oz = pz / len;
+      // Round-end: same clear-stump path, slightly hotter horizontal than chip toss.
+      const { ox, oz } = clearStumpForToss(f);
+      const hx = 2.4 + Math.random() * 1.0;
       f.body.velocity.set(
-        ox * (2.2 + Math.random() * 1.4) + (Math.random() - 0.5) * 0.6,
-        1.6 + Math.random() * 1.2,
-        oz * (2.2 + Math.random() * 1.4) + (Math.random() - 0.5) * 0.6,
+        ox * hx + (Math.random() - 0.5) * 0.5,
+        FIREWOOD_TOSS_VY + Math.random() * FIREWOOD_TOSS_VY_JIT,
+        oz * hx + (Math.random() - 0.5) * 0.5,
       );
       f.body.angularVelocity.set(
         (Math.random() - 0.5) * 5,
