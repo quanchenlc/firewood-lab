@@ -324,20 +324,17 @@ export function createFractureWorld(opts?: { stumpSupportY?: number }): Fracture
       uvAttr.needsUpdate = true;
     }
 
-    // Hollow / sparse cut face: synthesize a rectangular seal cap.
-    // Always add a thin seal so triangulation holes never read as black voids.
-    {
+    // Hollow / sparse cut face only: synthesize a rectangular seal at the cut centroid.
+    if (cutTriCount < 8) {
       mesh.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(mesh);
       const size = box.getSize(new THREE.Vector3());
-      const center = box.getCenter(new THREE.Vector3());
-      const width = Math.max(size.x, size.z) * 0.98;
-      const height = Math.max(0.2, size.y * 0.98);
+      const width = Math.max(0.15, Math.max(size.x, size.z) * 0.9);
+      const height = Math.max(0.2, size.y * 0.95);
       const capGeo = new THREE.PlaneGeometry(width, height, 1, 1);
       const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
       const matsArr = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const innerMat = (matsArr[1] ?? matsArr[0]) as THREE.Material;
-      // Prefer a dedicated double-sided clone so caps stay opaque.
       const capMat =
         innerMat && 'clone' in innerMat
           ? (innerMat.clone() as THREE.MeshStandardMaterial)
@@ -347,24 +344,40 @@ export function createFractureWorld(opts?: { stumpSupportY?: number }): Fracture
               side: THREE.DoubleSide,
             });
       if ('side' in capMat) capMat.side = THREE.DoubleSide;
-      const cap = new THREE.Mesh(capGeo, capMat);
-      cap.quaternion.copy(quat);
-      const extent = Math.abs(n.x) * size.x * 0.5 + Math.abs(n.z) * size.z * 0.5;
-      const toOrigin = new THREE.Vector3(-center.x, 0, -center.z);
-      const sideSign = Math.sign(toOrigin.dot(n)) || 1;
-      const worldCapPos = center.clone().addScaledVector(n, sideSign * extent * 0.92);
-      mesh.worldToLocal(worldCapPos);
-      cap.position.copy(worldCapPos);
-      cap.userData.role = 'cutCap';
-      cap.renderOrder = 1;
-      // Remove prior seal if re-chopping.
+
+      // Prefer centroid of existing cut verts (local space); else bbox face toward origin.
+      const localPos = new THREE.Vector3();
+      if (cutVerts.size >= 3) {
+        const avg = new THREE.Vector3();
+        const tmp = new THREE.Vector3();
+        for (const vi of cutVerts) {
+          tmp.fromBufferAttribute(pos, vi);
+          avg.add(tmp);
+        }
+        avg.multiplyScalar(1 / cutVerts.size);
+        localPos.copy(avg);
+      } else {
+        const center = box.getCenter(new THREE.Vector3());
+        const extent = Math.abs(n.x) * size.x * 0.5 + Math.abs(n.z) * size.z * 0.5;
+        const toOrigin = new THREE.Vector3(-center.x, 0, -center.z);
+        const sideSign = Math.sign(toOrigin.dot(n)) || 1;
+        const worldCapPos = center.clone().addScaledVector(n, sideSign * extent * 0.92);
+        mesh.worldToLocal(worldCapPos);
+        localPos.copy(worldCapPos);
+      }
+
       for (const child of [...mesh.children]) {
         if (child.userData?.role === 'cutCap') {
           mesh.remove(child);
-          const cg = (child as THREE.Mesh).geometry;
-          cg?.dispose();
+          (child as THREE.Mesh).geometry?.dispose();
         }
       }
+
+      const cap = new THREE.Mesh(capGeo, capMat);
+      cap.quaternion.copy(quat);
+      cap.position.copy(localPos);
+      cap.userData.role = 'cutCap';
+      cap.renderOrder = 1;
       mesh.add(cap);
       if (!cutGroup) {
         geo.addGroup(index.count, 0, 1);
