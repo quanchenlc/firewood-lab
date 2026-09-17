@@ -5,12 +5,17 @@ import {
   BOUNCE_TILT_DEG,
   BOUNCE_YAW_JITTER_DEG,
   cleaveNormalXZ,
+  horizontalAspectFromSize,
+  horizontalAspectXZ,
   INCH,
-  isFirewoodChip,
+  isFirewoodByVolumeAspect,
   isRechopWorthy,
+  isTooThinToSplit,
   MAX_LIVE_FRAGMENTS,
   MIN_RECHOP_DIAGONAL,
+  thicknessInchesAlong,
   TINY_CHIP_DIAGONAL,
+  volumeInchesFromBBox,
   type FracturePlan,
 } from '@firewood/game-core';
 
@@ -100,6 +105,13 @@ export interface FractureWorld {
     scene: THREE.Scene,
     opts?: { planeNormal?: THREE.Vector3 },
   ): PhysFragment[];
+  /**
+   * True when the mesh is thinner than 5″ along the cleave normal
+   * (reference too-thin gate — nudge camera instead of chopping).
+   */
+  isTooThinAlongNormal(mesh: THREE.Mesh, normal: THREE.Vector3): boolean;
+  /** Thickness in inches along a world-space cleave normal. */
+  thicknessInchesAlongNormal(mesh: THREE.Mesh, normal: THREE.Vector3): number;
   disposeMesh(mesh: THREE.Object3D, disposeMaterials?: boolean): void;
 }
 
@@ -217,6 +229,85 @@ export function createFractureWorld(
     return box.getSize(new THREE.Vector3()).length();
   }
 
+  /** Reference `hT`: PCA aspect of local XZ verts; bbox fallback. */
+  function pieceHorizontalAspect(mesh: THREE.Mesh): number {
+    const pos = mesh.geometry?.getAttribute('position');
+    if (pos && pos.count > 0) {
+      const xs = new Float32Array(pos.count);
+      const zs = new Float32Array(pos.count);
+      for (let i = 0; i < pos.count; i++) {
+        xs[i] = pos.getX(i);
+        zs[i] = pos.getZ(i);
+      }
+      return horizontalAspectXZ(xs, zs);
+    }
+    const box = new THREE.Box3().setFromObject(mesh);
+    const size = box.getSize(new THREE.Vector3());
+    return horizontalAspectFromSize(size.x, size.z);
+  }
+
+  /** Local geometry AABB size (fallback to world size). */
+  function localBBoxSize(mesh: THREE.Mesh, worldSize: THREE.Vector3): THREE.Vector3 {
+    const geom = mesh.geometry;
+    if (geom) {
+      if (!geom.boundingBox) geom.computeBoundingBox();
+      const bb = geom.boundingBox;
+      if (bb) {
+        return new THREE.Vector3(
+          Math.max(1e-6, bb.max.x - bb.min.x),
+          Math.max(1e-6, bb.max.y - bb.min.y),
+          Math.max(1e-6, bb.max.z - bb.min.z),
+        );
+      }
+    }
+    return worldSize.clone();
+  }
+
+  /** Classify stump vs firewood using volume (in³) + horizontal aspect. */
+  function classifyFirewood(
+    mesh: THREE.Mesh,
+    worldSize: THREE.Vector3,
+  ): { firewood: boolean; volumeInches: number; aspect: number } {
+    // Match reference `aw(geometry)`: local geometry AABB × fill / INCH³
+    const size = localBBoxSize(mesh, worldSize);
+    const volumeInches = volumeInchesFromBBox(size.x, size.y, size.z);
+    const aspect = pieceHorizontalAspect(mesh);
+    const firewood = isFirewoodByVolumeAspect(volumeInches, aspect);
+    if (firewood) {
+      console.info(
+        `[firewood] classify vol=${volumeInches.toFixed(1)} aspect=${aspect.toFixed(2)} firewood=true size=${size.x.toFixed(3)},${size.y.toFixed(3)},${size.z.toFixed(3)}`,
+      );
+    }
+    return { firewood, volumeInches, aspect };
+  }
+
+  /**
+   * Thickness along world cleave normal in inches (reference `pT`).
+   * Projects geometry verts through matrixWorld onto the unit normal.
+   */
+  function thicknessInchesAlongNormal(mesh: THREE.Mesh, normal: THREE.Vector3): number {
+    mesh.updateMatrixWorld(true);
+    const pos = mesh.geometry?.getAttribute('position');
+    if (!pos || pos.count === 0) {
+      const box = new THREE.Box3().setFromObject(mesh);
+      const size = box.getSize(new THREE.Vector3());
+      const n = normal.clone().normalize();
+      const extent = Math.abs(size.x * n.x) + Math.abs(size.y * n.y) + Math.abs(size.z * n.z);
+      return thicknessInchesAlong(extent);
+    }
+    const n = normal.clone().normalize();
+    const v = new THREE.Vector3();
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+      const d = v.dot(n);
+      if (d < min) min = d;
+      if (d > max) max = d;
+    }
+    return thicknessInchesAlong(max - min);
+  }
+
   /** Per-side slide so both halves open `gapFrac * diameter` face gap. */
   function sideOffsetFromPlan(diameter: number, gapFrac: number): number {
     // Inline (avoid any stale import binding): (frac * d) / 2
@@ -292,16 +383,20 @@ export function createFractureWorld(
   }
 
   function prune(): void {
-    // Drop tiny chips and enforce live cap (oldest non-splittable first)
+    // Drop tiny chips and enforce live cap.
     for (let i = fragments.length - 1; i >= 0; i--) {
       const f = fragments[i]!;
       const diag = bboxDiagonal(f.mesh);
-      if (diag < TINY_CHIP_DIAGONAL && !f.splittable) {
+      if (diag < TINY_CHIP_DIAGONAL && !f.splittable && !f.onStump) {
         removeFragment(i);
       }
     }
     while (fragments.length > MAX_LIVE_FRAGMENTS) {
-      const idx = fragments.findIndex((f) => !f.splittable);
+      // Prefer culling old ground-pile chips — never evict splittable stump
+      // pieces first (those are mid-split and about to become firewood).
+      let idx = fragments.findIndex((f) => !f.onStump && !f.splittable && !f.recycle);
+      if (idx < 0) idx = fragments.findIndex((f) => !f.onStump);
+      if (idx < 0) idx = fragments.findIndex((f) => f.onStump && !f.splittable);
       removeFragment(idx >= 0 ? idx : 0);
     }
     // Cull anything that fell through the world
@@ -726,7 +821,7 @@ export function createFractureWorld(
       const box0 = new THREE.Box3().setFromObject(fragment);
       const size0 = box0.getSize(new THREE.Vector3());
       const center0 = box0.getCenter(new THREE.Vector3());
-      const firewood = isFirewoodChip(size0.x, size0.y, size0.z);
+      const { firewood, volumeInches } = classifyFirewood(fragment, size0);
       const onStump = !firewood;
 
       const body = makeBodyFromMesh(fragment, plan.messy ? 1.15 : 1.35, onStump);
@@ -810,7 +905,7 @@ export function createFractureWorld(
         mesh: fragment,
         body,
         generation: childGen,
-        splittable: onStump && isRechopWorthy(diag, childGen),
+        splittable: onStump && isRechopWorthy(diag, childGen, volumeInches),
         bornAt: now,
         settleUntil: now + settleMs,
         onStump,
@@ -1061,6 +1156,10 @@ export function createFractureWorld(
     return fragments.some((f) => !!f.recycle);
   }
 
+  function isTooThinAlongNormal(mesh: THREE.Mesh, normal: THREE.Vector3): boolean {
+    return isTooThinToSplit(thicknessInchesAlongNormal(mesh, normal));
+  }
+
   return {
     world,
     fragments,
@@ -1080,6 +1179,8 @@ export function createFractureWorld(
     recycleToRing,
     isRecycling,
     fractureMesh,
+    isTooThinAlongNormal,
+    thicknessInchesAlongNormal,
     disposeMesh,
   };
 }

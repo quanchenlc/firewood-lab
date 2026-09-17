@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import { DestructibleMesh } from '@dgreenheck/three-pinata';
-import type { ChopOutcome, FracturePlan, Species } from '@firewood/game-core';
+import {
+  AZIMUTH_NUDGE_DAMP,
+  azimuthNudgeVelocity,
+  type ChopOutcome,
+  type FracturePlan,
+  type Species,
+} from '@firewood/game-core';
 import {
   loadSpeciesMaterials,
   type PlantedStump,
@@ -18,6 +24,11 @@ export interface LogScene {
   getRaycastTargets(): THREE.Object3D[];
   setOrbit(yaw: number, pitch: number): void;
   getOrbit(): { yaw: number; pitch: number };
+  /**
+   * Smooth ~90° azimuth nudge (reference `nudgeAzimuth`).
+   * `sign` from click left (−1) / right (+1) of screen center.
+   */
+  nudgeAzimuth(sign: number): void;
   placeMarker(point: THREE.Vector3, normal: THREE.Vector3): void;
   clearMarker(): void;
   /** Horizontal camera facing in XZ (for cleave plane from view). */
@@ -239,6 +250,8 @@ export function createLogScene(
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 80);
   let yaw = 0.7;
   let pitch = 0.38;
+  /** Per-frame damped yaw velocity for too-thin camera nudge. */
+  let azimuthVelocity = 0;
   const lookAt = new THREE.Vector3(0, 0.85, 0);
   const camRadius = 4.4;
 
@@ -697,6 +710,13 @@ export function createLogScene(
     fracture.sync();
     if (Math.random() < 0.05) fracture.prune();
 
+    // Too-thin nudge: integrate damped azimuth toward ~±90° total.
+    if (Math.abs(azimuthVelocity) > 1e-6) {
+      yaw += azimuthVelocity;
+      azimuthVelocity *= AZIMUTH_NUDGE_DAMP;
+      if (Math.abs(azimuthVelocity) < 1e-4) azimuthVelocity = 0;
+    }
+
     if (shake > 0) shake = Math.max(0, shake - dt * 2.8);
     if (punch > 0) {
       punch = Math.max(0, punch - dt * 1.8);
@@ -796,8 +816,13 @@ export function createLogScene(
     setOrbit(y, p) {
       yaw = y;
       pitch = p;
+      // Manual orbit cancels residual nudge so drag stays responsive.
+      azimuthVelocity = 0;
     },
     getOrbit: () => ({ yaw, pitch }),
+    nudgeAzimuth(sign: number) {
+      azimuthVelocity = azimuthNudgeVelocity(sign);
+    },
     placeMarker,
     clearMarker,
     getCameraFacingXZ,

@@ -24,7 +24,7 @@ type Phase = 'aim' | 'power' | 'result';
 const platform = createH5Platform();
 platform.storage.setItem(
   'firewood.h5.loop',
-  DEBUG_DIRECT_CHOP ? 'debug-direct-chop-v1' : 'camera-facing-recycle-v1',
+  DEBUG_DIRECT_CHOP ? 'debug-direct-chop-drop-nudge-v1' : 'camera-facing-recycle-v1',
 );
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
@@ -369,6 +369,38 @@ async function boot(): Promise<void> {
       ? phase === 'aim' || phase === 'power'
       : phase === 'power';
     if (!phaseOk || !aimPoint || !aimTarget || chopping || roundFinishing) return;
+
+    // Cleave plane first — need it for the too-thin thickness gate.
+    let planeNormal: THREE.Vector3;
+    if (DEBUG_DIRECT_CHOP) {
+      planeNormal = liveCleaveFromCamera();
+      lockedCleaveNormal = null;
+    } else {
+      if (!lockedCleaveNormal) lockCleaveFromCamera();
+      planeNormal = lockedCleaveNormal!.clone();
+    }
+
+    // Same-direction too thin (< 5″ along cleave normal): nudge camera ~90°, no chop.
+    if (logScene.fracture.isTooThinAlongNormal(aimTarget, planeNormal)) {
+      const sign = pointerNdc.x < 0 ? -1 : 1;
+      const inches = logScene.fracture.thicknessInchesAlongNormal(aimTarget, planeNormal);
+      logScene.nudgeAzimuth(sign);
+      resultEl.textContent = '太薄 · 换角度';
+      resultEl.className = 'result too_light';
+      if (resultFadeTimer !== null) window.clearTimeout(resultFadeTimer);
+      resultFadeTimer = window.setTimeout(() => {
+        resultFadeTimer = null;
+        resultEl.classList.add('is-fading');
+      }, 1100);
+    console.info(
+      `[firewood] too-thin nudge inches=${inches.toFixed(2)} sign=${sign}`,
+    );
+      aimPoint = null;
+      aimTarget = null;
+      setPhase('aim');
+      return;
+    }
+
     clearChopTimers();
     chopping = true;
     // Debug: always sweet mid-zone. Production: sample rhythm knob.
@@ -389,17 +421,6 @@ async function boot(): Promise<void> {
     const point = aimPoint.clone();
     const generation = aimGeneration;
     const rebound = outcome === 'too_light';
-
-    // Critical: cleave plane from LIVE camera facing at chop time when debug-direct.
-    // Production keeps the locked normal (+ optional 4→90° rotate).
-    let planeNormal: THREE.Vector3;
-    if (DEBUG_DIRECT_CHOP) {
-      planeNormal = liveCleaveFromCamera();
-      lockedCleaveNormal = null;
-    } else {
-      if (!lockedCleaveNormal) lockCleaveFromCamera();
-      planeNormal = lockedCleaveNormal!.clone();
-    }
 
     // Always swing top→down in the vertical plane; rebound when force is too light.
     logScene.playAxeSwing(point, { rebound });
@@ -644,13 +665,86 @@ async function boot(): Promise<void> {
       setPhase('power');
       return true;
     },
+    /** Prefer the smallest-volume splittable stump piece (demo firewood gate faster). */
+    aimSmallest: () => {
+      if (roundFinishing || chopping) return false;
+      const candidates = logScene.fracture.fragments.filter((f) => f.splittable && f.mesh.visible);
+      if (candidates.length === 0) return false;
+      let best = candidates[0]!;
+      let bestVol = Infinity;
+      for (const f of candidates) {
+        const geom = f.mesh.geometry;
+        if (geom && !geom.boundingBox) geom.computeBoundingBox();
+        const bb = geom?.boundingBox;
+        if (!bb) continue;
+        const vol =
+          Math.max(1e-6, bb.max.x - bb.min.x) *
+          Math.max(1e-6, bb.max.y - bb.min.y) *
+          Math.max(1e-6, bb.max.z - bb.min.z);
+        if (vol < bestVol) {
+          bestVol = vol;
+          best = f;
+        }
+      }
+      const box = new THREE.Box3().setFromObject(best.mesh);
+      const center = box.getCenter(new THREE.Vector3());
+      center.y = (box.min.y + box.max.y) * 0.5;
+      aimPoint = center;
+      aimTarget = best.mesh;
+      aimGeneration = best.generation;
+      if (DEBUG_DIRECT_CHOP) {
+        doChop();
+        return true;
+      }
+      setPhase('power');
+      return true;
+    },
     lockCleaveFromCamera: () => {
       const n = lockCleaveFromCamera();
       return { x: n.x, z: n.z };
     },
     fragmentCount: () => logScene.fracture.fragments.length,
     splittableCount: () => logScene.fracture.fragments.filter((f) => f.splittable).length,
+    firewoodCount: () => logScene.fracture.fragments.filter((f) => !f.onStump).length,
+    stumpCount: () => logScene.fracture.fragments.filter((f) => f.onStump).length,
+    /** Debug: per-piece local volume (in³) + aspect for classification tuning. */
+    pieceStats: () => {
+      const INCH = 0.0254;
+      const FILL = 0.7;
+      return logScene.fracture.fragments.map((f) => {
+        const geom = f.mesh.geometry;
+        if (geom && !geom.boundingBox) geom.computeBoundingBox();
+        const bb = geom?.boundingBox;
+        const sx = bb ? bb.max.x - bb.min.x : 0;
+        const sy = bb ? bb.max.y - bb.min.y : 0;
+        const sz = bb ? bb.max.z - bb.min.z : 0;
+        const vol = (sx * sy * sz * FILL) / (INCH * INCH * INCH);
+        return {
+          onStump: f.onStump,
+          splittable: f.splittable,
+          gen: f.generation,
+          vol: +vol.toFixed(1),
+          size: [+sx.toFixed(3), +sy.toFixed(3), +sz.toFixed(3)],
+        };
+      });
+    },
     isRecycling: () => logScene.isRecycling(),
+    nudgeAzimuth: (sign: number) => logScene.nudgeAzimuth(sign),
+    getOrbit: () => logScene.getOrbit(),
+    /** Thickness (inches) of aim target along live cleave normal. */
+    aimThicknessIn: () => {
+      if (!aimTarget) return null;
+      return logScene.fracture.thicknessInchesAlongNormal(aimTarget, liveCleaveFromCamera());
+    },
+    isAimTooThin: () => {
+      if (!aimTarget) return false;
+      return logScene.fracture.isTooThinAlongNormal(aimTarget, liveCleaveFromCamera());
+    },
+    setPointerNdc: (x: number, y: number) => {
+      pointerNdc.x = x;
+      pointerNdc.y = y;
+    },
+    getResultText: () => resultEl.textContent,
     /** Demo/test: force scatter→ring even if pieces remain. */
     forceFinish: () => {
       if (roundFinishing) return true;
