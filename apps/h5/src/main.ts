@@ -568,6 +568,14 @@ async function boot(): Promise<void> {
     getOrientFamilyIndex: () => orientFamilyIndex,
     chopsBeforeRotate: () => CHOPS_BEFORE_ORIENT_ROTATE,
     armLocked: () => armLockedTarget(),
+    /** Pick next splittable piece and enter power phase (demo-friendly). */
+    aimNext: () => {
+      if (roundFinishing || chopping) return false;
+      if (!lockedCleaveNormal) lockCleaveFromCamera();
+      if (!armLockedTarget()) return false;
+      setPhase('power');
+      return true;
+    },
     lockCleaveFromCamera: () => {
       const n = lockCleaveFromCamera();
       return { x: n.x, z: n.z };
