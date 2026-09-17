@@ -4,6 +4,10 @@ import {
   BOUNCE_DURATION_MS,
   BOUNCE_POP_HEIGHT,
   cleaveNormalXZ,
+  cleaveNormalFromCameraFacing,
+  rotateCleaveNormal90,
+  advanceOrientChopCount,
+  CHOPS_BEFORE_ORIENT_ROTATE,
   FACE_GAP_DIAMETER_FRAC,
   isFirewoodChip,
   isRechopWorthy,
@@ -73,6 +77,49 @@ describe('lateralOffsetFromDiameter', () => {
   it('splits face-gap frac across both halves', () => {
     // diameter 0.8, gap 0.2 → each side 0.08
     assert.ok(Math.abs(lateralOffsetFromDiameter(0.8, 0.2) - 0.08) < 1e-9);
+  });
+});
+
+describe('cleaveNormalFromCameraFacing', () => {
+  it('returns a unit normal perpendicular to horizontal facing', () => {
+    // Facing +Z → normal along ±X
+    const [nx, nz] = cleaveNormalFromCameraFacing(0, 1);
+    assert.ok(Math.abs(Math.hypot(nx, nz) - 1) < 1e-9);
+    assert.ok(Math.abs(Math.abs(nx) - 1) < 1e-9);
+    assert.ok(Math.abs(nz) < 1e-9);
+  });
+
+  it('falls back when facing is vertical-degenerate', () => {
+    const [nx, nz] = cleaveNormalFromCameraFacing(0, 0);
+    assert.ok(Math.abs(Math.hypot(nx, nz) - 1) < 1e-9);
+  });
+});
+
+describe('rotateCleaveNormal90 / advanceOrientChopCount', () => {
+  it('rotates 90° CCW', () => {
+    const [nx, nz] = rotateCleaveNormal90(1, 0);
+    assert.ok(Math.abs(nx) < 1e-9);
+    assert.ok(Math.abs(nz - 1) < 1e-9);
+  });
+
+  it('rotates after CHOPS_BEFORE_ORIENT_ROTATE successes', () => {
+    let count = 0;
+    let nx = 1;
+    let nz = 0;
+    let rotated = false;
+    for (let i = 0; i < CHOPS_BEFORE_ORIENT_ROTATE - 1; i++) {
+      const r = advanceOrientChopCount(count, nx, nz);
+      count = r.count;
+      nx = r.nx;
+      nz = r.nz;
+      rotated = r.rotated;
+      assert.equal(rotated, false);
+    }
+    const last = advanceOrientChopCount(count, nx, nz);
+    assert.equal(last.rotated, true);
+    assert.equal(last.count, 0);
+    assert.ok(Math.abs(last.nx) < 1e-9);
+    assert.ok(Math.abs(last.nz - 1) < 1e-9);
   });
 });
 

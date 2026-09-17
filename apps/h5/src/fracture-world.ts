@@ -52,6 +52,17 @@ export interface PhysFragment {
   onStump: boolean;
   /** Scripted bounce (non-firewood stump pieces). */
   bounce?: BounceAnim;
+  /** Scripted slide into the side circle pile after round completion. */
+  recycle?: {
+    startAt: number;
+    durationMs: number;
+    fromX: number;
+    fromY: number;
+    fromZ: number;
+    toX: number;
+    toY: number;
+    toZ: number;
+  };
 }
 
 export interface FractureWorld {
@@ -70,7 +81,15 @@ export interface FractureWorld {
   /** Fixed-step physics; returns whether a step ran. */
   step(dt: number, weakDevice: boolean): void;
   clearFragments(): void;
+  /** Remove stump/splittable pieces; keep ring-pile chips. */
+  clearStumpPieces(): void;
   prune(): void;
+  /** Knock stump pieces off as dynamic chips (round complete). */
+  scatterToGround(): void;
+  /** After scatter, slide pieces into a ring pile around the scene. */
+  recycleToRing(opts?: { radius?: number; groundY?: number }): void;
+  /** True while any fragment is still recycling into the ring. */
+  isRecycling(): boolean;
   fractureMesh(
     mesh: DestructibleMesh,
     worldImpact: THREE.Vector3,
@@ -229,6 +248,15 @@ export function createFractureWorld(opts?: { stumpSupportY?: number }): Fracture
 
   function clearFragments(): void {
     while (fragments.length) removeFragment(0);
+  }
+
+  function clearStumpPieces(): void {
+    for (let i = fragments.length - 1; i >= 0; i--) {
+      const f = fragments[i]!;
+      if (f.onStump || f.splittable || f.bounce || f.recycle) {
+        removeFragment(i);
+      }
+    }
   }
 
   function prune(): void {
@@ -858,6 +886,26 @@ export function createFractureWorld(opts?: { stumpSupportY?: number }): Fracture
 
     const now = performance.now();
     for (const f of fragments) {
+      if (f.recycle) {
+        const r = f.recycle;
+        const localT = now - r.startAt;
+        if (localT < 0) continue;
+        const u = Math.min(1, localT / Math.max(1, r.durationMs));
+        const ease = u * u * (3 - 2 * u);
+        const x = r.fromX + (r.toX - r.fromX) * ease;
+        const y = r.fromY + (r.toY - r.fromY) * ease + Math.sin(Math.PI * u) * 0.35;
+        const z = r.fromZ + (r.toZ - r.fromZ) * ease;
+        f.body.position.set(x, y, z);
+        f.mesh.position.set(x, y, z);
+        if (u >= 1) {
+          f.body.position.set(r.toX, r.toY, r.toZ);
+          f.mesh.position.set(r.toX, r.toY, r.toZ);
+          f.recycle = undefined;
+          f.body.sleep();
+        }
+        continue;
+      }
+
       if (applyBouncePose(f, now)) continue;
 
       if (f.body.type === CANNON.Body.STATIC) continue;
@@ -880,7 +928,7 @@ export function createFractureWorld(opts?: { stumpSupportY?: number }): Fracture
 
   function sync(): void {
     for (const f of fragments) {
-      if (f.bounce) continue; // bounce owns pose this frame
+      if (f.bounce || f.recycle) continue; // scripted pose owns this frame
       f.mesh.position.set(f.body.position.x, f.body.position.y, f.body.position.z);
       f.mesh.quaternion.set(
         f.body.quaternion.x,
@@ -889,6 +937,96 @@ export function createFractureWorld(opts?: { stumpSupportY?: number }): Fracture
         f.body.quaternion.w,
       );
     }
+  }
+
+  /** Convert stump halves to dynamic bodies and fling them outward onto the ground. */
+  function scatterToGround(): void {
+    const now = performance.now();
+    for (const f of fragments) {
+      f.bounce = undefined;
+      f.recycle = undefined;
+      f.onStump = false;
+      f.splittable = false;
+      f.settleUntil = now + 900;
+      // Rebuild as dynamic if currently static.
+      if (f.body.type === CANNON.Body.STATIC || f.body.mass === 0) {
+        const pos = f.body.position.clone();
+        const quat = f.body.quaternion.clone();
+        world.removeBody(f.body);
+        const box = new THREE.Box3().setFromObject(f.mesh);
+        const size = box.getSize(new THREE.Vector3());
+        const half = new CANNON.Vec3(
+          Math.max(0.04, size.x * 0.46),
+          Math.max(0.04, size.y * 0.46),
+          Math.max(0.04, size.z * 0.46),
+        );
+        const volume = Math.max(0.002, size.x * size.y * size.z);
+        f.body = new CANNON.Body({
+          mass: Math.max(0.1, volume * 180),
+          type: CANNON.Body.DYNAMIC,
+          shape: new CANNON.Box(half),
+          material: woodMat,
+          position: pos,
+          quaternion: quat,
+          linearDamping: 0.55,
+          angularDamping: 0.62,
+          allowSleep: true,
+        });
+        world.addBody(f.body);
+      }
+      const px = f.body.position.x;
+      const pz = f.body.position.z;
+      const len = Math.hypot(px, pz) || 1;
+      const ox = px / len;
+      const oz = pz / len;
+      f.body.velocity.set(
+        ox * (2.2 + Math.random() * 1.4) + (Math.random() - 0.5) * 0.6,
+        1.6 + Math.random() * 1.2,
+        oz * (2.2 + Math.random() * 1.4) + (Math.random() - 0.5) * 0.6,
+      );
+      f.body.angularVelocity.set(
+        (Math.random() - 0.5) * 5,
+        (Math.random() - 0.5) * 4,
+        (Math.random() - 0.5) * 5,
+      );
+      f.body.wakeUp();
+    }
+  }
+
+  /** Slide every live fragment into a big ring pile around the chopping block. */
+  function recycleToRing(opts?: { radius?: number; groundY?: number }): void {
+    const radius = opts?.radius ?? 2.35;
+    const groundY = opts?.groundY ?? 0.08;
+    const now = performance.now();
+    const n = Math.max(1, fragments.length);
+    for (let i = 0; i < fragments.length; i++) {
+      const f = fragments[i]!;
+      f.bounce = undefined;
+      f.onStump = false;
+      f.splittable = false;
+      // Freeze physics — recycle animator owns pose.
+      f.body.velocity.set(0, 0, 0);
+      f.body.angularVelocity.set(0, 0, 0);
+      f.body.type = CANNON.Body.STATIC;
+      f.body.mass = 0;
+      f.body.updateMassProperties();
+      const ang = (i / n) * Math.PI * 2 + Math.random() * 0.08;
+      const rad = radius + (Math.random() - 0.5) * 0.35;
+      f.recycle = {
+        startAt: now + i * 35,
+        durationMs: 520 + Math.random() * 180,
+        fromX: f.body.position.x,
+        fromY: f.body.position.y,
+        fromZ: f.body.position.z,
+        toX: Math.cos(ang) * rad,
+        toY: groundY + Math.random() * 0.06,
+        toZ: Math.sin(ang) * rad,
+      };
+    }
+  }
+
+  function isRecycling(): boolean {
+    return fragments.some((f) => !!f.recycle);
   }
 
   return {
@@ -903,7 +1041,11 @@ export function createFractureWorld(opts?: { stumpSupportY?: number }): Fracture
     sync,
     step,
     clearFragments,
+    clearStumpPieces,
     prune,
+    scatterToGround,
+    recycleToRing,
+    isRecycling,
     fractureMesh,
     disposeMesh,
   };
