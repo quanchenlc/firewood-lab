@@ -20,6 +20,7 @@ Cut-face maps are longitudinal grain from `scripts/facegrain-canvas.mjs`.
 | `models/axes/camp-axe/*` | wooden_axe_03 | https://polyhaven.com/a/wooden_axe_03 | CC0 |
 | `models/axes/maul/*` | sledgehammer_01 | https://polyhaven.com/a/sledgehammer_01 | CC0 |
 | `ground/forest_ground_04/*` | forest_ground_04 | https://polyhaven.com/a/forest_ground_04 | CC0 |
+| `sky/kloofendal_43d_clear_puresky/*` | kloofendal_43d_clear_puresky (1K HDR) | https://polyhaven.com/a/kloofendal_43d_clear_puresky | CC0 |
 
 Refresh / re-download (network required):
 

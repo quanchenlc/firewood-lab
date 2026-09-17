@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import type { Axe, Species } from '@firewood/game-core';
 import { assetUrl } from './asset-url';
 
@@ -7,6 +8,7 @@ export type ProgressFn = (ratio: number, label: string) => void;
 
 const texLoader = new THREE.TextureLoader();
 const gltfLoader = new GLTFLoader();
+const rgbeLoader = new RGBELoader();
 
 function loadTexture(url: string, colorSpace?: THREE.ColorSpace): Promise<THREE.Texture> {
   return new Promise((resolve, reject) => {
@@ -161,20 +163,86 @@ export function normalizeModel(root: THREE.Object3D, maxSize: number): THREE.Obj
   return root;
 }
 
-/** Lean outdoor ground maps (Poly Haven forest_ground_04, 1K). */
+/**
+ * Plant Poly Haven tree_stump_02 as a chopping block (劈柴台):
+ * ground → stump with flat cut top → round log on that face.
+ * Source mesh is wide/rooty; non-uniform scale makes it read as a stump, not a dirt hill.
+ */
+export interface PlantedStump {
+  root: THREE.Object3D;
+  /** World Y of the flat chopping face (raycast center). */
+  topY: number;
+  /** Approximate top radius for physics / pad sizing. */
+  topRadius: number;
+  /** Visual stump height after planting. */
+  height: number;
+}
+
+export function plantChoppingStump(root: THREE.Object3D): PlantedStump {
+  root.position.set(0, 0, 0);
+  root.rotation.set(0, 0, 0);
+  root.scale.set(1, 1, 1);
+  root.updateMatrixWorld(true);
+
+  const box0 = new THREE.Box3().setFromObject(root);
+  const size0 = box0.getSize(new THREE.Vector3());
+  const center0 = box0.getCenter(new THREE.Vector3());
+
+  // Target: stump slightly wider than the upright round (~Ø0.8), block height ~0.55.
+  const TARGET_DIAM = 1.08;
+  const TARGET_HEIGHT = 0.56;
+  const rawW = Math.max(size0.x, size0.z, 0.001);
+  const sxz = TARGET_DIAM / rawW;
+  const sy = TARGET_HEIGHT / Math.max(size0.y, 0.001);
+
+  root.position.set(-center0.x, -center0.y, -center0.z);
+  root.scale.set(sxz, sy, sxz);
+  root.updateMatrixWorld(true);
+
+  const box1 = new THREE.Box3().setFromObject(root);
+  root.position.y -= box1.min.y;
+  root.updateMatrixWorld(true);
+
+  const box2 = new THREE.Box3().setFromObject(root);
+  let topY = box2.max.y - 0.015;
+  {
+    // Prefer a center hit so bark nubs at the rim don't lift the log.
+    const ray = new THREE.Raycaster(
+      new THREE.Vector3(0, box2.max.y + 1.5, 0),
+      new THREE.Vector3(0, -1, 0),
+    );
+    const hits = ray.intersectObject(root, true);
+    if (hits[0]) topY = hits[0].point.y + 0.004;
+  }
+
+  const size2 = box2.getSize(new THREE.Vector3());
+  const topRadius = Math.max(size2.x, size2.z) * 0.5 * 0.78;
+  return { root, topY, topRadius, height: size2.y };
+}
+
+/** Lean outdoor ground + daytime sky (Poly Haven CC0, 1K). */
 export interface YardTextures {
   groundDiff: THREE.Texture;
   groundNor: THREE.Texture | null;
+  /** Equirect HDR (or null if missing) — used as scene.background. */
+  sky: THREE.DataTexture | null;
 }
 
 export async function loadYardTextures(): Promise<YardTextures> {
-  const [groundDiff, groundNor] = await Promise.all([
+  const [groundDiff, groundNor, sky] = await Promise.all([
     loadTexture('assets/ground/forest_ground_04/diff.jpg', THREE.SRGBColorSpace),
     loadTexture('assets/ground/forest_ground_04/nor.jpg').catch(() => null),
+    rgbeLoader
+      .loadAsync(assetUrl('assets/sky/kloofendal_43d_clear_puresky/sky_1k.hdr'))
+      .then((tex) => {
+        tex.mapping = THREE.EquirectangularReflectionMapping;
+        return tex as THREE.DataTexture;
+      })
+      .catch(() => null),
   ]);
   groundDiff.repeat.set(5.5, 5.5);
   if (groundNor) groundNor.repeat.copy(groundDiff.repeat);
-  return { groundDiff, groundNor };
+  return { groundDiff, groundNor, sky };
 }
 
 export async function preloadContentAssets(
@@ -193,12 +261,12 @@ export async function preloadContentAssets(
 
   tasks.push(async () => {
     onProgress(0.05, '树桩模型…');
+    // Raw GLB — plantChoppingStump() in the scene sets chopping-block proportions.
     stump = await loadGltf('assets/models/stump/tree_stump_02_1k.gltf');
-    normalizeModel(stump, 1.55);
   });
 
   tasks.push(async () => {
-    onProgress(0.12, '地面…');
+    onProgress(0.12, '地面与天空…');
     yard = await loadYardTextures();
   });
 

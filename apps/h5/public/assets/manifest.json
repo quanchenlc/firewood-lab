@@ -10,7 +10,10 @@
     "forest_ground_04": {
       "diff": "ground/forest_ground_04/diff.jpg",
       "nor": "ground/forest_ground_04/nor.jpg"
+    },
+    "kloofendal_43d_clear_puresky": {
+      "hdr": "sky/kloofendal_43d_clear_puresky/sky_1k.hdr"
     }
   },
-  "generatedAt": "2026-09-17T02:30:00.000Z"
+  "generatedAt": "2026-09-17T03:25:00.000Z"
 }

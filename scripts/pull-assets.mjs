@@ -35,6 +35,11 @@ const MODELS = [
   { id: 'sledgehammer_01', dir: 'models/axes/maul' },
 ];
 
+const GROUND = [{ id: 'forest_ground_04', dir: 'ground/forest_ground_04' }];
+
+/** Daytime pure-sky HDRIs (1K Radiance) — mobile-friendly equirect backgrounds. */
+const SKIES = [{ id: 'kloofendal_43d_clear_puresky', dir: 'sky/kloofendal_43d_clear_puresky', file: 'sky_1k.hdr' }];
+
 const ENDGRAIN_TINTS = {
   pinus: [210, 180, 120],
   'quercus-serrata': [180, 140, 90],
@@ -87,6 +92,32 @@ async function pullBark() {
   }
 }
 
+async function pullGround() {
+  for (const item of GROUND) {
+    console.log('ground', item.id);
+    const files = await api(`/files/${item.id}`);
+    const maps = [
+      ['Diffuse', 'diff.jpg'],
+      ['nor_gl', 'nor.jpg'],
+    ];
+    for (const [key, filename] of maps) {
+      const file = pickJpg(files[key], '1k');
+      if (!file) throw new Error(`Missing ${item.id} ${key}`);
+      await download(file.url, join(OUT, item.dir, filename));
+    }
+  }
+}
+
+async function pullSkies() {
+  for (const item of SKIES) {
+    console.log('sky', item.id);
+    const files = await api(`/files/${item.id}`);
+    const hdr = files.hdri?.['1k']?.hdr;
+    if (!hdr?.url) throw new Error(`No hdri/1k/hdr for ${item.id}`);
+    await download(hdr.url, join(OUT, item.dir, item.file));
+  }
+}
+
 async function pullModel(id, dir) {
   console.log('model', id);
   const files = await api(`/files/${id}`);
@@ -121,6 +152,8 @@ function writeFacegrains() {
 async function main() {
   mkdirSync(OUT, { recursive: true });
   await pullBark();
+  await pullGround();
+  await pullSkies();
   writeEndgrain();
   writeFacegrains();
   const modelIndex = {};
@@ -128,7 +161,19 @@ async function main() {
     const file = await pullModel(m.id, m.dir);
     modelIndex[m.id] = `${m.dir}/${file}`;
   }
-  writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ models: modelIndex, generatedAt: new Date().toISOString() }, null, 2));
+  const textureIndex = {
+    forest_ground_04: {
+      diff: 'ground/forest_ground_04/diff.jpg',
+      nor: 'ground/forest_ground_04/nor.jpg',
+    },
+    kloofendal_43d_clear_puresky: {
+      hdr: 'sky/kloofendal_43d_clear_puresky/sky_1k.hdr',
+    },
+  };
+  writeFileSync(
+    join(OUT, 'manifest.json'),
+    JSON.stringify({ models: modelIndex, textures: textureIndex, generatedAt: new Date().toISOString() }, null, 2),
+  );
   console.log('Done →', OUT);
 }
 
