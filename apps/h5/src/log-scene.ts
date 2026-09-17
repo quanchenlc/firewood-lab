@@ -14,6 +14,14 @@ import {
   type YardTextures,
 } from './assets';
 import { createFractureWorld, type FractureWorld, type PhysFragment } from './fracture-world';
+import {
+  CAM_LOOK_AT_Y,
+  CAM_RADIUS,
+  LOG_HEIGHT,
+  LOG_RADIUS_BOT,
+  LOG_RADIUS_TOP,
+  STUMP_BOT_RADIUS,
+} from './log-dimensions';
 
 export interface LogScene {
   scene: THREE.Scene;
@@ -67,15 +75,11 @@ export interface LogScene {
   findFragment(mesh: THREE.Object3D): PhysFragment | undefined;
 }
 
-/** Log height (Y) for upright round sitting on the stump. */
-const LOG_HEIGHT = 0.7;
-const LOG_RADIUS_TOP = 0.36;
-const LOG_RADIUS_BOT = 0.4;
-
 /**
  * Fracture proxy: low-poly cylinder (Voronoi/slice-friendly).
  * Rest pose is upright — cut face up, axis near world +Y (like screen.toys/firewood).
  * Visual stump is a separate dense GLB underneath — too heavy to fracture directly (~33k verts).
+ * Dimensions: see `log-dimensions.ts` (scaled to firewood volume gates).
  */
 function buildLogGeometry(): THREE.BufferGeometry {
   // CylinderGeometry default: axis = +Y, caps on top/bottom (end-grain).
@@ -159,7 +163,7 @@ function addYardDebris(scene: THREE.Scene, opts: { weak: boolean }): void {
   for (let i = 0; i < count; i++) {
     const ang = yardRand(seed) * Math.PI * 2;
     // Prefer a ring around the stump; keep clear of the log footprint.
-    const rad = 0.85 + yardRand(seed) * 2.4 + (i % 5) * 0.08;
+    const rad = STUMP_BOT_RADIUS + 0.35 + yardRand(seed) * 2.2 + (i % 5) * 0.08;
     const x = Math.cos(ang) * rad;
     const z = Math.sin(ang) * rad;
     const sx = 0.05 + yardRand(seed) * 0.11;
@@ -210,7 +214,7 @@ function addYardDebris(scene: THREE.Scene, opts: { weak: boolean }): void {
   });
   for (let i = 0; i < scrapCount; i++) {
     const ang = yardRand(seed) * Math.PI * 2;
-    const rad = 1.15 + yardRand(seed) * 1.6;
+    const rad = STUMP_BOT_RADIUS + 0.65 + yardRand(seed) * 1.5;
     const scrap = new THREE.Mesh(scrapGeo, scrapMat);
     scrap.position.set(Math.cos(ang) * rad, 0.02, Math.sin(ang) * rad);
     scrap.rotation.set(
@@ -252,8 +256,8 @@ export function createLogScene(
   let pitch = 0.38;
   /** Per-frame damped yaw velocity for too-thin camera nudge. */
   let azimuthVelocity = 0;
-  const lookAt = new THREE.Vector3(0, 0.85, 0);
-  const camRadius = 4.4;
+  const lookAt = new THREE.Vector3(0, CAM_LOOK_AT_Y, 0);
+  const camRadius = CAM_RADIUS;
 
   // Bright hemisphere: warm sky + greenish ground bounce.
   scene.add(new THREE.HemisphereLight(0xfff8ee, 0x7f9a62, weak ? 1.45 : 1.75));
@@ -318,7 +322,7 @@ export function createLogScene(
 
   // Thin packed-earth ring under the stump only (not a dirt hill the log sits on).
   const pad = new THREE.Mesh(
-    new THREE.CircleGeometry(Math.max(0.55, planted.topRadius * 1.2), 36),
+    new THREE.CircleGeometry(Math.max(planted.topRadius * 1.25, planted.topRadius + 0.08), 36),
     new THREE.MeshStandardMaterial({
       color: 0x8a6f52,
       roughness: 1,
@@ -362,7 +366,7 @@ export function createLogScene(
   const _camFwd = new THREE.Vector3();
 
   const marker = new THREE.Mesh(
-    new THREE.SphereGeometry(0.05, 14, 14),
+    new THREE.SphereGeometry(0.035, 14, 14),
     new THREE.MeshStandardMaterial({
       color: 0xffd28a,
       emissive: 0xc47a2c,
@@ -373,7 +377,7 @@ export function createLogScene(
   marker.visible = false;
   scene.add(marker);
   const markerRing = new THREE.Mesh(
-    new THREE.RingGeometry(0.065, 0.1, 20),
+    new THREE.RingGeometry(0.045, 0.07, 20),
     new THREE.MeshBasicMaterial({
       color: 0xffe0a8,
       side: THREE.DoubleSide,
@@ -384,7 +388,7 @@ export function createLogScene(
   marker.add(markerRing);
 
   const nickMark = new THREE.Mesh(
-    new THREE.SphereGeometry(0.04, 10, 10),
+    new THREE.SphereGeometry(0.028, 10, 10),
     new THREE.MeshStandardMaterial({ color: 0x3a2a18, roughness: 1, transparent: true }),
   );
   nickMark.visible = false;

@@ -34,6 +34,8 @@ export const INCH = 0.0254;
 /**
  * Reference firewood volume gate (cubic inches), from screen.toys `performSplit`.
  * Volume uses AABB × fill factor then ÷ INCH³ (see `volumeInchesFromBBox`).
+ * H5 choppable log is scaled so full-round volume sits in the low thousands in³
+ * under these gates — do not raise the thresholds to “fix” an oversized log.
  */
 export const FIREWOOD_VOL_ABS_MIN = 250;
 export const FIREWOOD_VOL_MAX = 500;
@@ -46,7 +48,7 @@ export const MIN_SPLIT_THICKNESS_IN = 5;
 /** Per-frame azimuth damping for ~90° camera nudge (`fd = 0.92`). */
 export const AZIMUTH_NUDGE_DAMP = 0.92;
 /** Target face-to-face gap as a fraction of the pre-split log diameter.
- * Modest crack: ~0.2× diameter total (~1–2″ per side on a ~0.8 m round).
+ * Modest crack: ~0.2× diameter total (~1–2″ per side on a ~0.38 m round).
  * Tuned down hard from the previous ~0.5–0.7× "wide dump" feel.
  */
 export const FACE_GAP_DIAMETER_FRAC = 0.2;
