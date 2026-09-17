@@ -232,7 +232,12 @@ export function createLogScene(
       new THREE.MeshStandardMaterial({ color: 0xd4b896, roughness: 0.9 }),
     ];
     const inner =
-      mats?.inner ?? new THREE.MeshStandardMaterial({ color: 0xc4a574, roughness: 0.9 });
+      mats?.inner ??
+      new THREE.MeshStandardMaterial({
+        color: 0xc4a574,
+        roughness: 0.9,
+        side: THREE.DoubleSide,
+      });
     const mesh = new DestructibleMesh(buildLogGeometry(), outer[0]!, inner);
     mesh.material = outer;
     mesh.position.set(0, logCenterY, 0);

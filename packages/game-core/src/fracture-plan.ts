@@ -6,9 +6,8 @@
  * (grain-aligned / planar split) over isotropic Voronoi burst.
  *
  * Settle feel mirrors reverse-engineered screen.toys/firewood `performSplit`
- * bounce (logic only — not assets). Live reference screenshots show an
- * obvious lateral 错开 ≈ half the original log diameter (both halves move),
- * not a hairline 1″ crack.
+ * bounce (logic only — not assets). Face gap is a modest crack
+ * (~0.15–0.25× diameter total / ~1–2″ per side), not a half-diameter dump.
  */
 
 import type { ChopOutcome } from './chop-types.ts';
@@ -33,10 +32,10 @@ export type SplitStyle = 'nick' | 'cleave' | 'cleave_messy';
 /** Metres per inch — screen.toys unit scale `ld = 0.0254`. */
 export const INCH = 0.0254;
 /** Target face-to-face gap as a fraction of the pre-split log diameter.
- * Live screen.toys first-chop reads ≈ 0.5× diameter (both halves slide out).
- * Tuned slightly above 0.5 so foreshortened camera views still read as obvious 错开.
+ * Modest crack: ~0.2× diameter total (~1–2″ per side on a ~0.8 m round).
+ * Tuned down hard from the previous ~0.5–0.7× "wide dump" feel.
  */
-export const FACE_GAP_DIAMETER_FRAC = 0.7;
+export const FACE_GAP_DIAMETER_FRAC = 0.2;
 /** Peak pop height during settle (metres) — keep subtle; main motion is lateral. */
 export const BOUNCE_POP_HEIGHT = 0.04;
 /** Scripted slide duration in ms. */
@@ -143,11 +142,11 @@ export function planFracture(input: FracturePlanInput): FracturePlan {
   const impulse =
     outcome === 'too_heavy' ? 0.06 + weight * 0.04 : 0.04 + weight * 0.02;
 
-  // Face gap ≈ half a diameter on first chop; later chops open a bit less.
+  // Face gap ≈ 0.2× diameter on first chop; later chops open a bit less.
   const gapFrac =
     FACE_GAP_DIAMETER_FRAC *
-    (outcome === 'too_heavy' ? 1.08 : 1) *
-    (generation > 0 ? 0.75 : 1);
+    (outcome === 'too_heavy' ? 1.1 : 1) *
+    (generation > 0 ? 0.7 : 1);
 
   return {
     fragmentCount,

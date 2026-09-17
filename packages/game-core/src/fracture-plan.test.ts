@@ -22,7 +22,7 @@ describe('planFracture', () => {
     assert.equal(p.popHeight, 0);
   });
 
-  it('sweet is a clean 2-way cleave with ~half-diameter face gap frac', () => {
+  it('sweet is a clean 2-way cleave with modest face-gap frac', () => {
     const p = planFracture({
       outcome: 'sweet',
       axe: { weight: 0.5, edge: 0.6 },
@@ -33,9 +33,9 @@ describe('planFracture', () => {
     assert.equal(p.splitStyle, 'cleave');
     assert.ok(p.impulse > 0);
     assert.ok(p.impulse < 0.35, 'sweet impulse stays a wedged nudge, not a burst');
-    // Live reference: face gap ≈ 0.5 × log diameter (wedgeGap stores the fraction).
+    // Modest crack: face gap ≈ 0.15–0.25× log diameter (wedgeGap stores the fraction).
     assert.ok(Math.abs(p.wedgeGap - FACE_GAP_DIAMETER_FRAC) < 1e-9);
-    assert.ok(p.wedgeGap >= 0.45 && p.wedgeGap <= 0.85);
+    assert.ok(p.wedgeGap >= 0.15 && p.wedgeGap <= 0.25);
     assert.ok(Math.abs(p.popHeight - BOUNCE_POP_HEIGHT) < 1e-9);
     assert.equal(p.bounceMs, BOUNCE_DURATION_MS);
   });
@@ -71,8 +71,8 @@ describe('planFracture', () => {
 
 describe('lateralOffsetFromDiameter', () => {
   it('splits face-gap frac across both halves', () => {
-    // diameter 0.8, gap 0.5 → each side 0.2
-    assert.ok(Math.abs(lateralOffsetFromDiameter(0.8, 0.5) - 0.2) < 1e-9);
+    // diameter 0.8, gap 0.2 → each side 0.08
+    assert.ok(Math.abs(lateralOffsetFromDiameter(0.8, 0.2) - 0.08) < 1e-9);
   });
 });
 

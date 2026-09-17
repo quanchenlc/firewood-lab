@@ -17,8 +17,8 @@ import {
 
 /**
  * Scripted settle bounce — mirrors screen.toys/firewood `performSplit` animator
- * (logic reverse-engineered; no assets copied). Live reference: bipartition with
- * an obvious lateral 错开 ≈ half the log diameter, pieces stay upright on stump.
+ * (logic reverse-engineered; no assets copied). First chop: two upright halves
+ * with a modest lateral crack (~0.2× diameter), resting on the stump.
  */
 export interface BounceAnim {
   /** Horizontal push direction (impact → piece centroid, y=0). */
@@ -150,8 +150,11 @@ export function createFractureWorld(): FractureWorld {
   const FIXED = 1 / 60;
   const up = new THREE.Vector3(0, 1, 0);
   const sliceOpts = new SliceOptions();
-  /** World Y of the chopping-block top — stump pieces snap here so they don't hover. */
-  const STUMP_SUPPORT_Y = 0.52;
+  // three-pinata leaves normalizationScaleFactor at 1 → UV already ~[0,1];
+  // keep scale near 1 so face-grain doesn't micro-tile into a moiré.
+  sliceOpts.textureScale.set(1, 1);
+  /** World Y of the chopping-block top — match log-scene stumpTopY (0.53). */
+  const STUMP_SUPPORT_Y = 0.53;
   const _tiltQ = new THREE.Quaternion();
   const _yawQ = new THREE.Quaternion();
   const _outQ = new THREE.Quaternion();
@@ -247,6 +250,113 @@ export function createFractureWorld(): FractureWorld {
     const center = box.getCenter(new THREE.Vector3());
     const [nx, nz] = cleaveNormalXZ(worldImpact.x, worldImpact.z, center.x, center.z);
     return new THREE.Vector3(nx, 0, nz);
+  }
+
+  /**
+   * Remap cut-face UVs to a clean 0–1 projection and seal missing cut faces
+   * (triangulation sometimes leaves hollow shells / triangular holes).
+   */
+  function repairCutFace(mesh: DestructibleMesh, planeNormal: THREE.Vector3): void {
+    const geo = mesh.geometry;
+    if (!geo?.attributes.position) return;
+
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const uvAttr = geo.attributes.uv as THREE.BufferAttribute | undefined;
+    const index = geo.index;
+    if (!index || !uvAttr) return;
+
+    // Ensure material groups: 0 = outer, 1 = cut
+    if (!geo.groups.length) {
+      geo.addGroup(0, index.count, 0);
+    }
+    let cutGroup = geo.groups.find((g) => g.materialIndex === 1);
+    const cutTriCount = cutGroup ? Math.floor(cutGroup.count / 3) : 0;
+
+    // Basis for planar UV (Y-up grain preference)
+    const n = planeNormal.clone().normalize();
+    n.y = 0;
+    if (n.lengthSq() < 1e-8) n.set(1, 0, 0);
+    else n.normalize();
+    const tangent = new THREE.Vector3(-n.z, 0, n.x);
+    const bitangent = up.clone();
+
+    // Collect vertex indices used by cut-face triangles
+    const cutVerts = new Set<number>();
+    if (cutGroup && cutTriCount > 0) {
+      const end = cutGroup.start + cutGroup.count;
+      for (let i = cutGroup.start; i < end; i++) {
+        cutVerts.add(index.getX(i));
+      }
+    }
+
+    if (cutVerts.size >= 3) {
+      let uMin = Infinity;
+      let uMax = -Infinity;
+      let vMin = Infinity;
+      let vMax = -Infinity;
+      const tmp = new THREE.Vector3();
+      for (const vi of cutVerts) {
+        tmp.fromBufferAttribute(pos, vi);
+        const u = tmp.dot(tangent);
+        const v = tmp.dot(bitangent);
+        uMin = Math.min(uMin, u);
+        uMax = Math.max(uMax, u);
+        vMin = Math.min(vMin, v);
+        vMax = Math.max(vMax, v);
+      }
+      const uSpan = Math.max(1e-6, uMax - uMin);
+      const vSpan = Math.max(1e-6, vMax - vMin);
+      for (const vi of cutVerts) {
+        tmp.fromBufferAttribute(pos, vi);
+        const u = (tmp.dot(tangent) - uMin) / uSpan;
+        const v = (tmp.dot(bitangent) - vMin) / vSpan;
+        uvAttr.setXY(vi, u, v);
+      }
+      uvAttr.needsUpdate = true;
+    }
+
+    // Hollow / sparse cut face: synthesize a rectangular seal cap.
+    if (cutTriCount < 8) {
+      mesh.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(mesh);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      // Cap sits on the flat side of the half (toward cleave plane / impact).
+      const width = Math.max(size.x, size.z) * 0.98;
+      const height = Math.max(0.2, size.y * 0.98);
+      const capGeo = new THREE.PlaneGeometry(width, height, 1, 1);
+      // PlaneGeometry faces +Z; rotate so +Z aligns with planeNormal.
+      const quat = new THREE.Quaternion().setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1),
+        n,
+      );
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const innerMat = (mats[1] ?? mats[0]) as THREE.Material;
+      const cap = new THREE.Mesh(capGeo, innerMat);
+      cap.quaternion.copy(quat);
+      // Place cap on the flat side of the half (bbox face along ±n toward origin).
+      const extent =
+        Math.abs(n.x) * size.x * 0.5 + Math.abs(n.z) * size.z * 0.5;
+      const toOrigin = new THREE.Vector3(-center.x, 0, -center.z);
+      const sideSign = Math.sign(toOrigin.dot(n)) || 1;
+      const worldCapPos = center.clone().addScaledVector(n, sideSign * extent * 0.92);
+      mesh.worldToLocal(worldCapPos);
+      cap.position.copy(worldCapPos);
+      cap.userData.role = 'cutCap';
+      cap.renderOrder = 1;
+      mesh.add(cap);
+      // Also mark geometry so later chops still have a cut group hint.
+      if (!cutGroup) {
+        geo.addGroup(index.count, 0, 1);
+      }
+    }
+
+    // Force DoubleSide on inner material if present.
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const inner = mats[1] as THREE.MeshStandardMaterial | undefined;
+    if (inner && 'side' in inner) {
+      inner.side = THREE.DoubleSide;
+    }
   }
 
   /** Prefer exactly two largest leaves when the budget is 2 (sweet first chop). */
@@ -388,7 +498,7 @@ export function createFractureWorld(): FractureWorld {
         px = planeNormal.x * Math.sign(alongN || 1);
         pz = planeNormal.z * Math.sign(alongN || 1);
       }
-      const nudge = 0.35 * INCH * falloff;
+      const nudge = 0.18 * INCH * falloff;
       f.body.position.x += px * nudge;
       f.body.position.z += pz * nudge;
       f.mesh.position.set(f.body.position.x, f.body.position.y, f.body.position.z);
@@ -516,6 +626,7 @@ export function createFractureWorld(): FractureWorld {
 
     for (let i = 0; i < pieces.length; i++) {
       const fragment = pieces[i]!;
+      repairCutFace(fragment, planeNormal);
       scene.add(fragment);
       fragment.updateMatrixWorld(true);
 
@@ -640,7 +751,7 @@ export function createFractureWorld(): FractureWorld {
     }
 
     // Overlap resolve only for settled stump pieces — bouncing halves already
-    // get the designed ~half-diameter face gap from lateralOffsetFromDiameter.
+    // get the designed modest face gap from lateralOffsetFromDiameter.
     resolveStumpOverlaps();
     return created;
   }
