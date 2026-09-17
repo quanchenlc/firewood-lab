@@ -15,13 +15,17 @@ import {
 import { axes, species } from '@firewood/content';
 import { createH5Platform } from '@firewood/platform';
 import { preloadContentAssets } from './assets';
+import { DEBUG_DIRECT_CHOP, forceBarEnabled } from './debug-flags';
 import { detectWeakDevice } from './fracture-world';
 import { createLogScene, tintLog } from './log-scene';
 
 type Phase = 'aim' | 'power' | 'result';
 
 const platform = createH5Platform();
-platform.storage.setItem('firewood.h5.loop', 'camera-facing-recycle-v1');
+platform.storage.setItem(
+  'firewood.h5.loop',
+  DEBUG_DIRECT_CHOP ? 'debug-direct-chop-v1' : 'camera-facing-recycle-v1',
+);
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
 const flashEl = document.querySelector<HTMLDivElement>('#flash')!;
@@ -113,6 +117,7 @@ async function boot(): Promise<void> {
   /**
    * Locked vertical cleave-plane normal (from camera facing at first click).
    * After CHOPS_BEFORE_ORIENT_ROTATE successes, yaw 90° and reset the counter.
+   * Bypassed while DEBUG_DIRECT_CHOP — every chop uses live camera facing.
    */
   let lockedCleaveNormal: THREE.Vector3 | null = null;
   /** Successful chops (sweet/heavy) in the current orientation family. */
@@ -154,7 +159,8 @@ async function boot(): Promise<void> {
 
   function setPhase(next: Phase): void {
     phase = next;
-    const showPower = next === 'power';
+    // Debug-direct-chop: never show the rhythm / force bar.
+    const showPower = forceBarEnabled && next === 'power';
     powerPanel.classList.toggle('is-hidden', !showPower);
     powerPanel.setAttribute('aria-hidden', String(!showPower));
     againBtn.classList.toggle(
@@ -169,13 +175,19 @@ async function boot(): Promise<void> {
     } else if (next === 'aim') {
       phaseHint.classList.remove('is-gone');
       phaseHint.classList.add('is-soft');
-      phaseHint.textContent = logScene.fracture.fragments.some((f) => f.splittable)
-        ? lockedCleaveNormal
-          ? orientSuccessCount >= CHOPS_BEFORE_ORIENT_ROTATE - 1
-            ? '点木块 · 下一刀将转向'
-            : '点木块继续劈'
-          : '点木块继续'
-        : '拖动旋转视角 · 点木头开始';
+      if (DEBUG_DIRECT_CHOP) {
+        phaseHint.textContent = logScene.fracture.fragments.some((f) => f.splittable)
+          ? '点木块继续劈'
+          : '拖动旋转视角 · 点木头劈开';
+      } else {
+        phaseHint.textContent = logScene.fracture.fragments.some((f) => f.splittable)
+          ? lockedCleaveNormal
+            ? orientSuccessCount >= CHOPS_BEFORE_ORIENT_ROTATE - 1
+              ? '点木块 · 下一刀将转向'
+              : '点木块继续劈'
+            : '点木块继续'
+          : '拖动旋转视角 · 点木头开始';
+      }
       if (!lastOutcome) {
         resultEl.textContent = '';
         resultEl.className = 'result is-soft';
@@ -225,10 +237,23 @@ async function boot(): Promise<void> {
   }
 
   function tickRhythm(dt: number): void {
-    if (phase !== 'power' || chopping) return;
+    if (!forceBarEnabled || phase !== 'power' || chopping) return;
     rhythmPhase += dt * rhythmHz() * Math.PI * 2;
     rhythm01 = 0.5 + 0.5 * Math.sin(rhythmPhase);
     updateForceUi();
+  }
+
+  /** Midpoint of the current sweet zone — used by debug-direct-chop (always split). */
+  function sweetMidSlider01(): number {
+    const { lo, hi } = getSweetSliderRange(currentSpecies(), currentAxe());
+    return (lo + hi) * 0.5;
+  }
+
+  /** Live cleave normal from current camera facing (no lock). */
+  function liveCleaveFromCamera(): THREE.Vector3 {
+    const facing = logScene.getCameraFacingXZ();
+    const [nx, nz] = cleaveNormalFromCameraFacing(facing.x, facing.z);
+    return new THREE.Vector3(nx, 0, nz);
   }
 
   function buzz(outcome: ChopOutcome): void {
@@ -265,11 +290,10 @@ async function boot(): Promise<void> {
     return true;
   }
 
-  /** Capture / refresh cleave normal from current camera horizontal facing. */
+  /** Capture / refresh locked cleave normal from current camera horizontal facing. */
   function lockCleaveFromCamera(): THREE.Vector3 {
-    const facing = logScene.getCameraFacingXZ();
-    const [nx, nz] = cleaveNormalFromCameraFacing(facing.x, facing.z);
-    lockedCleaveNormal = new THREE.Vector3(nx, 0, nz);
+    const n = liveCleaveFromCamera();
+    lockedCleaveNormal = n;
     return lockedCleaveNormal;
   }
 
@@ -299,6 +323,10 @@ async function boot(): Promise<void> {
     return true;
   }
 
+  /**
+   * Raycast wood at client coords and store the exact hit point.
+   * Returns false on miss (not on wood) — no chop.
+   */
   function aimAt(clientX: number, clientY: number): boolean {
     if (roundFinishing || logScene.isRecycling() || chopping) return false;
     const rect = canvas.getBoundingClientRect();
@@ -310,29 +338,41 @@ async function boot(): Promise<void> {
     if (!hit) return false;
 
     const obj = hit.object as DestructibleMesh;
+    // Exact click hit — never use a cached / mid-piece proxy point.
     aimPoint = hit.point.clone();
     aimTarget = obj;
     const frag = logScene.findFragment(obj);
     aimGeneration = frag?.generation ?? (obj.userData.generation as number) ?? 0;
 
-    // First contact locks cleave from camera facing (not a wood marker).
+    logScene.clearMarker();
+    platform.audio.play('aim', { volume: 0.25 });
+
+    if (DEBUG_DIRECT_CHOP) {
+      // Debug: no rhythm bar / lock — chop immediately at this hit + live facing.
+      doChop();
+      return true;
+    }
+
+    // Production path: first contact locks cleave from camera facing.
     if (!lockedCleaveNormal) {
       lockCleaveFromCamera();
       orientSuccessCount = 0;
       orientFamilyIndex = 0;
     }
-
-    logScene.clearMarker();
-    platform.audio.play('aim', { volume: 0.25 });
     setPhase('power');
     return true;
   }
 
   function doChop(): void {
-    if (phase !== 'power' || !aimPoint || !aimTarget || chopping || roundFinishing) return;
+    // Debug-direct: chop from aim phase after aimAt; production requires power phase.
+    const phaseOk = DEBUG_DIRECT_CHOP
+      ? phase === 'aim' || phase === 'power'
+      : phase === 'power';
+    if (!phaseOk || !aimPoint || !aimTarget || chopping || roundFinishing) return;
     clearChopTimers();
     chopping = true;
-    lockedSlider01 = rhythm01;
+    // Debug: always sweet mid-zone. Production: sample rhythm knob.
+    lockedSlider01 = DEBUG_DIRECT_CHOP ? sweetMidSlider01() : rhythm01;
     const sp = currentSpecies();
     const axe = currentAxe();
     const outcome = resolveChop({ slider01: lockedSlider01, species: sp, axe });
@@ -349,8 +389,17 @@ async function boot(): Promise<void> {
     const point = aimPoint.clone();
     const generation = aimGeneration;
     const rebound = outcome === 'too_light';
-    if (!lockedCleaveNormal) lockCleaveFromCamera();
-    const planeNormal = lockedCleaveNormal!.clone();
+
+    // Critical: cleave plane from LIVE camera facing at chop time when debug-direct.
+    // Production keeps the locked normal (+ optional 4→90° rotate).
+    let planeNormal: THREE.Vector3;
+    if (DEBUG_DIRECT_CHOP) {
+      planeNormal = liveCleaveFromCamera();
+      lockedCleaveNormal = null;
+    } else {
+      if (!lockedCleaveNormal) lockCleaveFromCamera();
+      planeNormal = lockedCleaveNormal!.clone();
+    }
 
     // Always swing top→down in the vertical plane; rebound when force is too light.
     logScene.playAxeSwing(point, { rebound });
@@ -377,8 +426,8 @@ async function boot(): Promise<void> {
         logScene.clearMarker();
       } else {
         logScene.fractureAt(target, point, plan, generation, { planeNormal });
-        // Count successful splits at impact (not on UI timer) so 4→90° is reliable.
-        if (lockedCleaveNormal) {
+        // 4-chop 90° rotate only when force bar / lock path is active.
+        if (!DEBUG_DIRECT_CHOP && lockedCleaveNormal) {
           orientSuccessCount += 1;
           if (orientSuccessCount >= CHOPS_BEFORE_ORIENT_ROTATE) {
             const [rx, rz] = rotateCleaveNormal90(lockedCleaveNormal.x, lockedCleaveNormal.z);
@@ -404,9 +453,12 @@ async function boot(): Promise<void> {
 
       if (rebound) {
         // Weak force: keep locked direction + same aim; rhythm bar continues.
-        if (!aimPoint || !aimTarget) armLockedTarget();
-        setPhase('power');
-        return;
+        // Debug-direct never rebounds (sweet mid), but keep the branch for flag flip.
+        if (!DEBUG_DIRECT_CHOP) {
+          if (!aimPoint || !aimTarget) armLockedTarget();
+          setPhase('power');
+          return;
+        }
       }
 
       if (maybeFinishRound()) {
@@ -414,7 +466,7 @@ async function boot(): Promise<void> {
         return;
       }
 
-      // Next chop needs a fresh click-at-hit (no aim marker); keep direction lock.
+      // Next chop needs a fresh click-at-hit (no aim marker).
       aimPoint = null;
       aimTarget = null;
       setPhase('aim');
@@ -482,8 +534,9 @@ async function boot(): Promise<void> {
   });
 
   // Second click: confirm chop from the rhythm dock (or anywhere else in power).
+  // Disabled while DEBUG_DIRECT_CHOP (no force bar).
   powerPanel.addEventListener('pointerdown', (e) => {
-    if (phase !== 'power') return;
+    if (!forceBarEnabled || phase !== 'power') return;
     e.preventDefault();
     e.stopPropagation();
     doChop();
@@ -528,11 +581,11 @@ async function boot(): Promise<void> {
         const rect = canvas.getBoundingClientRect();
         const cx = rect.left + sample.x;
         const cy = rect.top + sample.y;
-        if (phase === 'power' && !chopping) {
+        if (forceBarEnabled && phase === 'power' && !chopping) {
           // Confirm swing from rhythm bar / second click.
           doChop();
         } else if (phase === 'aim' && !chopping) {
-          // Click-at-hit arms the rhythm bar (camera facing already locked or set here).
+          // Click-at-hit: debug → instant chop; production → arm rhythm bar.
           aimAt(cx, cy);
         }
       }
@@ -553,6 +606,8 @@ async function boot(): Promise<void> {
 
   // Test hook for automated feel verification (dev / local only).
   (window as unknown as { __fwTest?: object }).__fwTest = {
+    debugDirectChop: () => DEBUG_DIRECT_CHOP,
+    forceBarEnabled: () => forceBarEnabled,
     getPhase: () => phase,
     getRhythm: () => rhythm01,
     setRhythm: (v: number) => {
@@ -567,15 +622,25 @@ async function boot(): Promise<void> {
       lockedCleaveNormal
         ? { x: lockedCleaveNormal.x, z: lockedCleaveNormal.z }
         : null,
+    /** Live cleave normal from current camera (what debug-direct uses each chop). */
+    getLiveCleave: () => {
+      const n = liveCleaveFromCamera();
+      return { x: n.x, z: n.z };
+    },
+    getCameraFacing: () => logScene.getCameraFacingXZ(),
     getOrientSuccessCount: () => orientSuccessCount,
     getOrientFamilyIndex: () => orientFamilyIndex,
     chopsBeforeRotate: () => CHOPS_BEFORE_ORIENT_ROTATE,
     armLocked: () => armLockedTarget(),
-    /** Pick next splittable piece and enter power phase (demo-friendly). */
+    /** Pick next splittable piece; production enters power, debug chops immediately. */
     aimNext: () => {
       if (roundFinishing || chopping) return false;
-      if (!lockedCleaveNormal) lockCleaveFromCamera();
+      if (!DEBUG_DIRECT_CHOP && !lockedCleaveNormal) lockCleaveFromCamera();
       if (!armLockedTarget()) return false;
+      if (DEBUG_DIRECT_CHOP) {
+        doChop();
+        return true;
+      }
       setPhase('power');
       return true;
     },
@@ -641,7 +706,15 @@ async function boot(): Promise<void> {
     freezeAxeImpact: () => logScene.debugFreezeAxeImpact(),
     getAxePose: () => logScene.debugAxePose(),
     outcomePreview: () =>
-      resolveChop({ slider01: rhythm01, species: currentSpecies(), axe: currentAxe() }),
+      resolveChop({
+        slider01: DEBUG_DIRECT_CHOP ? sweetMidSlider01() : rhythm01,
+        species: currentSpecies(),
+        axe: currentAxe(),
+      }),
+    lastCleaveNormal: () => {
+      const n = logScene.lastCleaveNormal;
+      return n ? { x: n.x, z: n.z } : null;
+    },
   };
 
   function frame(now: number): void {
