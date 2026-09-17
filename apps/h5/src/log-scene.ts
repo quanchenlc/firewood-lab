@@ -486,7 +486,10 @@ export function createLogScene(
 
   function getRaycastTargets(): THREE.Object3D[] {
     const targets: THREE.Object3D[] = [];
-    if (logMesh.visible && logMesh.parent) targets.push(logMesh);
+    // Whole log is aimable only until it has been registered as a tossed chip.
+    if (logMesh.visible && logMesh.parent && !findFragment(logMesh)) {
+      targets.push(logMesh);
+    }
     for (const f of fracture.fragments) {
       if (f.splittable && f.mesh.visible) targets.push(f.mesh);
     }
@@ -534,7 +537,7 @@ export function createLogScene(
   } | null {
     const candidates = fracture.fragments.filter((f) => f.splittable && f.mesh.visible);
     if (candidates.length === 0) {
-      if (logMesh.visible && logMesh.parent) {
+      if (logMesh.visible && logMesh.parent && !findFragment(logMesh)) {
         return {
           mesh: logMesh,
           point: new THREE.Vector3(0, logCenterY + LOG_HEIGHT * 0.15, 0),

@@ -4,6 +4,7 @@ import { DestructibleMesh } from '@dgreenheck/three-pinata';
 import {
   CHOPS_BEFORE_ORIENT_ROTATE,
   cleaveNormalFromCameraFacing,
+  decideTooThinChop,
   getSweetSliderRange,
   planFracture,
   resolveChop,
@@ -24,7 +25,7 @@ type Phase = 'aim' | 'power' | 'result';
 const platform = createH5Platform();
 platform.storage.setItem(
   'firewood.h5.loop',
-  DEBUG_DIRECT_CHOP ? 'debug-direct-chop-drop-nudge-v1' : 'camera-facing-recycle-v1',
+  DEBUG_DIRECT_CHOP ? 'debug-direct-chop-option-a-v1' : 'camera-facing-recycle-v1',
 );
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
@@ -306,7 +307,12 @@ async function boot(): Promise<void> {
   function maybeFinishRound(): boolean {
     if (roundFinishing) return true;
     const hasSplittable = logScene.fracture.fragments.some((f) => f.splittable && f.mesh.visible);
-    const hasLog = logScene.logMesh.visible && !!logScene.logMesh.parent;
+    // Whole log still counts only while it has not been registered as a tossed chip.
+    const logFrag = logScene.findFragment(logScene.logMesh);
+    const hasLog =
+      logScene.logMesh.visible &&
+      !!logScene.logMesh.parent &&
+      !logFrag;
     if (hasSplittable || hasLog) return false;
     roundFinishing = true;
     lockedCleaveNormal = null;
@@ -380,21 +386,51 @@ async function boot(): Promise<void> {
       planeNormal = lockedCleaveNormal!.clone();
     }
 
-    // Same-direction too thin (< 5″ along cleave normal): nudge camera ~90°, no chop.
+    // Same-direction too thin (< 5″ along cleave normal): option A
+    // — both dirs thin OR already firewood → toss; else yaw ~90°, no chop.
     if (logScene.fracture.isTooThinAlongNormal(aimTarget, planeNormal)) {
-      const sign = pointerNdc.x < 0 ? -1 : 1;
       const inches = logScene.fracture.thicknessInchesAlongNormal(aimTarget, planeNormal);
+      const [rx, rz] = rotateCleaveNormal90(planeNormal.x, planeNormal.z);
+      const perpNormal = new THREE.Vector3(rx, 0, rz);
+      const perpInches = logScene.fracture.thicknessInchesAlongNormal(aimTarget, perpNormal);
+      const alreadyFirewood = logScene.fracture.isFirewoodMesh(aimTarget);
+      const decision = decideTooThinChop({
+        currentThicknessIn: inches,
+        perpThicknessIn: perpInches,
+        alreadyFirewood,
+      });
+
+      if (resultFadeTimer !== null) window.clearTimeout(resultFadeTimer);
+
+      if (decision === 'toss') {
+        logScene.fracture.tossAsFirewood(aimTarget, { planeNormal });
+        resultEl.textContent = '成柴 · 落地';
+        resultEl.className = 'result sweet';
+        resultFadeTimer = window.setTimeout(() => {
+          resultFadeTimer = null;
+          resultEl.classList.add('is-fading');
+        }, 1100);
+        console.info(
+          `[firewood] too-thin toss inches=${inches.toFixed(2)} perp=${perpInches.toFixed(2)} firewood=${alreadyFirewood}`,
+        );
+        aimPoint = null;
+        aimTarget = null;
+        setPhase('aim');
+        maybeFinishRound();
+        return;
+      }
+
+      const sign = pointerNdc.x < 0 ? -1 : 1;
       logScene.nudgeAzimuth(sign);
       resultEl.textContent = '太薄 · 换角度';
       resultEl.className = 'result too_light';
-      if (resultFadeTimer !== null) window.clearTimeout(resultFadeTimer);
       resultFadeTimer = window.setTimeout(() => {
         resultFadeTimer = null;
         resultEl.classList.add('is-fading');
       }, 1100);
-    console.info(
-      `[firewood] too-thin nudge inches=${inches.toFixed(2)} sign=${sign}`,
-    );
+      console.info(
+        `[firewood] too-thin nudge inches=${inches.toFixed(2)} perp=${perpInches.toFixed(2)} sign=${sign}`,
+      );
       aimPoint = null;
       aimTarget = null;
       setPhase('aim');
@@ -731,6 +767,74 @@ async function boot(): Promise<void> {
     isRecycling: () => logScene.isRecycling(),
     nudgeAzimuth: (sign: number) => logScene.nudgeAzimuth(sign),
     getOrbit: () => logScene.getOrbit(),
+    setOrbit: (yaw: number, pitch: number) => logScene.setOrbit(yaw, pitch),
+    /** Select smallest stump piece without chopping (peek / force paths). */
+    selectSmallest: () => {
+      if (roundFinishing || chopping) return false;
+      const candidates = logScene.fracture.fragments.filter((f) => f.splittable && f.mesh.visible);
+      if (candidates.length === 0) return false;
+      let best = candidates[0]!;
+      let bestVol = Infinity;
+      for (const f of candidates) {
+        const geom = f.mesh.geometry;
+        if (geom && !geom.boundingBox) geom.computeBoundingBox();
+        const bb = geom?.boundingBox;
+        if (!bb) continue;
+        const vol =
+          Math.max(1e-6, bb.max.x - bb.min.x) *
+          Math.max(1e-6, bb.max.y - bb.min.y) *
+          Math.max(1e-6, bb.max.z - bb.min.z);
+        if (vol < bestVol) {
+          bestVol = vol;
+          best = f;
+        }
+      }
+      const box = new THREE.Box3().setFromObject(best.mesh);
+      const center = box.getCenter(new THREE.Vector3());
+      center.y = (box.min.y + box.max.y) * 0.5;
+      aimPoint = center;
+      aimTarget = best.mesh;
+      aimGeneration = best.generation;
+      return true;
+    },
+    /** Force toss current aim target as firewood (debug). */
+    tossAim: () => {
+      if (!aimTarget) return false;
+      const ok = logScene.fracture.tossAsFirewood(aimTarget, {
+        planeNormal: liveCleaveFromCamera(),
+      });
+      if (ok) {
+        resultEl.textContent = '成柴 · 落地';
+        resultEl.className = 'result sweet';
+        aimPoint = null;
+        aimTarget = null;
+        setPhase('aim');
+        maybeFinishRound();
+      }
+      return ok;
+    },
+    /** Option A: perp thickness + firewood gate for current aim. */
+    aimTooThinDecision: () => {
+      if (!aimTarget) return null;
+      const n = liveCleaveFromCamera();
+      const inches = logScene.fracture.thicknessInchesAlongNormal(aimTarget, n);
+      const [rx, rz] = rotateCleaveNormal90(n.x, n.z);
+      const perp = logScene.fracture.thicknessInchesAlongNormal(
+        aimTarget,
+        new THREE.Vector3(rx, 0, rz),
+      );
+      const alreadyFirewood = logScene.fracture.isFirewoodMesh(aimTarget);
+      return {
+        currentIn: inches,
+        perpIn: perp,
+        alreadyFirewood,
+        decision: decideTooThinChop({
+          currentThicknessIn: inches,
+          perpThicknessIn: perp,
+          alreadyFirewood,
+        }),
+      };
+    },
     /** Thickness (inches) of aim target along live cleave normal. */
     aimThicknessIn: () => {
       if (!aimTarget) return null;
