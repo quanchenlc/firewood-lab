@@ -545,30 +545,24 @@ async function boot(): Promise<void> {
           const b = boxes[j]!;
           const d = Math.hypot(a.x - b.x, a.z - b.z);
           if (d > maxGap) maxGap = d;
-          // AABB face gap along the stronger separation axis.
-          const gapX = Math.max(0, Math.max(a.minX, b.minX) - Math.min(a.maxX, b.maxX));
-          const gapZ = Math.max(0, Math.max(a.minZ, b.minZ) - Math.min(a.maxZ, b.maxZ));
-          // When boxes are separated on one axis, the gap is the positive separation.
           const sepX = a.maxX < b.minX ? b.minX - a.maxX : b.maxX < a.minX ? a.minX - b.maxX : 0;
           const sepZ = a.maxZ < b.minZ ? b.minZ - a.maxZ : b.maxZ < a.minZ ? a.minZ - b.maxZ : 0;
-          const faces = Math.max(sepX, sepZ, gapX, gapZ);
+          const faces = Math.max(sepX, sepZ);
           if (faces > faceGap) faceGap = faces;
         }
       }
-      const spanX = Math.max(...boxes.map((b) => b.maxX), 0) - Math.min(...boxes.map((b) => b.minX), 0);
-      const spanZ = Math.max(...boxes.map((b) => b.maxZ), 0) - Math.min(...boxes.map((b) => b.minZ), 0);
-      const outerSpan = Math.max(spanX, spanZ);
-      // Original diameter ≈ outer span − face gap for a 2-piece bipartition.
-      const approxDiameter =
-        boxes.length === 2 && faceGap > 0 ? Math.max(0.2, outerSpan - faceGap) : Math.max(outerSpan * 0.7, 0.2);
+      const debug = logScene.fracture.lastCleaveDebug;
+      const approxDiameter = debug?.diameter ?? 0.8;
       return {
         count: stump.length,
         centers: boxes,
         maxGap,
         faceGap,
         approxDiameter,
-        faceGapFrac: faceGap / approxDiameter,
-        sideOffsetHint: faceGap / 2,
+        faceGapFrac: approxDiameter > 1e-6 ? faceGap / approxDiameter : 0,
+        sideOffset: debug?.sideOffset ?? null,
+        gapFracPlan: debug?.gapFrac ?? null,
+        cleaveDebug: debug,
       };
     },
     /** Freeze axe at vertical impact pose over the log (for screenshot tests). */

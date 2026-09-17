@@ -32,11 +32,11 @@ export type SplitStyle = 'nick' | 'cleave' | 'cleave_messy';
 
 /** Metres per inch — screen.toys unit scale `ld = 0.0254`. */
 export const INCH = 0.0254;
-/**
- * Target face-to-face gap as a fraction of the pre-split log diameter.
+/** Target face-to-face gap as a fraction of the pre-split log diameter.
  * Live screen.toys first-chop reads ≈ 0.5× diameter (both halves slide out).
+ * Tuned slightly above 0.5 so foreshortened camera views still read as obvious 错开.
  */
-export const FACE_GAP_DIAMETER_FRAC = 0.5;
+export const FACE_GAP_DIAMETER_FRAC = 0.7;
 /** Peak pop height during settle (metres) — keep subtle; main motion is lateral. */
 export const BOUNCE_POP_HEIGHT = 0.04;
 /** Scripted slide duration in ms. */

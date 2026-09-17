@@ -35,6 +35,7 @@ describe('planFracture', () => {
     assert.ok(p.impulse < 0.35, 'sweet impulse stays a wedged nudge, not a burst');
     // Live reference: face gap ≈ 0.5 × log diameter (wedgeGap stores the fraction).
     assert.ok(Math.abs(p.wedgeGap - FACE_GAP_DIAMETER_FRAC) < 1e-9);
+    assert.ok(p.wedgeGap >= 0.45 && p.wedgeGap <= 0.85);
     assert.ok(Math.abs(p.popHeight - BOUNCE_POP_HEIGHT) < 1e-9);
     assert.equal(p.bounceMs, BOUNCE_DURATION_MS);
   });

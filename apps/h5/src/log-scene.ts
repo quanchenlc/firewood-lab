@@ -493,6 +493,10 @@ export function createLogScene(
 
   function update(dt: number): void {
     if (typeof document !== 'undefined' && document.hidden) {
+      // Still advance scripted bounce / physics so splits settle even if the tab
+      // is backgrounded (automated tests / focus changes).
+      fracture.step(dt, weak);
+      fracture.sync();
       applyCamera();
       return;
     }

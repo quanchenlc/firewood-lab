@@ -58,6 +58,13 @@ export interface PhysFragment {
 export interface FractureWorld {
   world: CANNON.World;
   fragments: PhysFragment[];
+  /** Last cleave debug (diameter / side offset) for feel tuning. */
+  lastCleaveDebug: {
+    diameter: number;
+    gapFrac: number;
+    sideOffset: number;
+    pieceCount: number;
+  } | null;
   sync(): void;
   /** Fixed-step physics; returns whether a step ran. */
   step(dt: number, weakDevice: boolean): void;
@@ -138,6 +145,7 @@ export function createFractureWorld(): FractureWorld {
   world.addBody(stump);
 
   const fragments: PhysFragment[] = [];
+  let lastCleaveDebug: FractureWorld['lastCleaveDebug'] = null;
   let accumulator = 0;
   const FIXED = 1 / 60;
   const up = new THREE.Vector3(0, 1, 0);
@@ -497,6 +505,12 @@ export function createFractureWorld(): FractureWorld {
     const settleMs = plan.bounceMs + 40;
     // plan.wedgeGap is face-gap fraction of diameter; each half slides half of that.
     const sideOffset = lateralOffsetFromDiameter(logDiameter, plan.wedgeGap);
+    lastCleaveDebug = {
+      diameter: logDiameter,
+      gapFrac: plan.wedgeGap,
+      sideOffset,
+      pieceCount: pieces.length,
+    };
 
     nudgeNeighbors(worldImpact, planeNormal);
 
@@ -552,22 +566,32 @@ export function createFractureWorld(): FractureWorld {
       const baseZ = body.position.z;
       const baseQuat = fragment.quaternion.clone();
 
+      // Snap immediately to the final lateral offset so the 错开 is correct even
+      // if the bounce animator misses frames; animate the slide from closed→open.
+      const finalX = baseX + pushX * sideOffset;
+      const finalZ = baseZ + pushZ * sideOffset;
+
       body.velocity.set(0, 0, 0);
       body.angularVelocity.set(0, 0, 0);
 
       if (!onStump) {
         // Firewood chips: light physics toss toward a side pile (not main halves).
-        const side = Math.sign(pushX * planeNormal.x + pushZ * planeNormal.z) || (i % 2 === 0 ? 1 : -1);
+        const tossSide =
+          Math.sign(pushX * planeNormal.x + pushZ * planeNormal.z) || (i % 2 === 0 ? 1 : -1);
         body.velocity.set(
-          pushX * (1.2 + Math.random() * 0.6) + planeNormal.x * side * 0.4,
+          pushX * (1.2 + Math.random() * 0.6) + planeNormal.x * tossSide * 0.4,
           1.4 + Math.random() * 0.8,
-          pushZ * (1.2 + Math.random() * 0.6) + planeNormal.z * side * 0.4,
+          pushZ * (1.2 + Math.random() * 0.6) + planeNormal.z * tossSide * 0.4,
         );
         body.angularVelocity.set(
           (Math.random() - 0.5) * 4,
           (Math.random() - 0.5) * 3,
           (Math.random() - 0.5) * 4,
         );
+      } else {
+        // Start closed at base; first animator tick slides toward final.
+        body.position.set(baseX, baseY, baseZ);
+        fragment.position.set(baseX, baseY, baseZ);
       }
 
       world.addBody(body);
@@ -605,6 +629,8 @@ export function createFractureWorld(): FractureWorld {
             }
           : undefined,
       };
+      // Record intended final for safety settle.
+      fragment.userData.finalXZ = { x: finalX, z: finalZ };
       fragment.userData.phys = entry;
       fragment.userData.role = 'fragment';
       fragment.userData.generation = childGen;
@@ -723,6 +749,9 @@ export function createFractureWorld(): FractureWorld {
   return {
     world,
     fragments,
+    get lastCleaveDebug() {
+      return lastCleaveDebug;
+    },
     sync,
     step,
     clearFragments,
