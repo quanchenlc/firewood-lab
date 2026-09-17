@@ -6,5 +6,11 @@
     "wooden_axe_03": "models/axes/camp-axe/wooden_axe_03_1k.gltf",
     "sledgehammer_01": "models/axes/maul/sledgehammer_01_1k.gltf"
   },
-  "generatedAt": "2026-09-16T06:35:10.729Z"
+  "textures": {
+    "forest_ground_04": {
+      "diff": "ground/forest_ground_04/diff.jpg",
+      "nor": "ground/forest_ground_04/nor.jpg"
+    }
+  },
+  "generatedAt": "2026-09-17T02:30:00.000Z"
 }

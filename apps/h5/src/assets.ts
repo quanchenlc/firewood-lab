@@ -161,6 +161,22 @@ export function normalizeModel(root: THREE.Object3D, maxSize: number): THREE.Obj
   return root;
 }
 
+/** Lean outdoor ground maps (Poly Haven forest_ground_04, 1K). */
+export interface YardTextures {
+  groundDiff: THREE.Texture;
+  groundNor: THREE.Texture | null;
+}
+
+export async function loadYardTextures(): Promise<YardTextures> {
+  const [groundDiff, groundNor] = await Promise.all([
+    loadTexture('assets/ground/forest_ground_04/diff.jpg', THREE.SRGBColorSpace),
+    loadTexture('assets/ground/forest_ground_04/nor.jpg').catch(() => null),
+  ]);
+  groundDiff.repeat.set(5.5, 5.5);
+  if (groundNor) groundNor.repeat.copy(groundDiff.repeat);
+  return { groundDiff, groundNor };
+}
+
 export async function preloadContentAssets(
   speciesList: Species[],
   axesList: Axe[],
@@ -168,15 +184,22 @@ export async function preloadContentAssets(
 ): Promise<{
   stump: THREE.Group;
   axes: Map<string, THREE.Group>;
+  yard: YardTextures;
 }> {
   const tasks: Array<() => Promise<void>> = [];
   const axes = new Map<string, THREE.Group>();
   let stump!: THREE.Group;
+  let yard!: YardTextures;
 
   tasks.push(async () => {
     onProgress(0.05, '树桩模型…');
     stump = await loadGltf('assets/models/stump/tree_stump_02_1k.gltf');
     normalizeModel(stump, 1.55);
+  });
+
+  tasks.push(async () => {
+    onProgress(0.12, '地面…');
+    yard = await loadYardTextures();
   });
 
   for (const axe of axesList) {
@@ -226,5 +249,5 @@ export async function preloadContentAssets(
     onProgress(0.15 + (done / tasks.length) * 0.8, '加载中…');
   }
   onProgress(1, '就绪');
-  return { stump, axes };
+  return { stump, axes, yard };
 }
