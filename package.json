@@ -15,11 +15,6 @@
     "node": ">=20"
   },
   "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  },
-  "devDependencies": {
-    "ws": "^8.21.3"
+    "onlyBuiltDependencies": ["esbuild"]
   }
 }
