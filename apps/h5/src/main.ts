@@ -95,7 +95,7 @@ function closeChips(): void {
 
 async function boot(): Promise<void> {
   const preloaded = await preloadContentAssets(species, axes, setLoader);
-  const logScene = createLogScene(canvas, preloaded.stump, {
+  const logScene = createLogScene(canvas, preloaded.choppingBlock, {
     weakDevice,
     yard: preloaded.yard,
   });

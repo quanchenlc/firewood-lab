@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import type { Axe, Species } from '@firewood/game-core';
 import { assetUrl } from './asset-url';
 
@@ -7,6 +8,7 @@ export type ProgressFn = (ratio: number, label: string) => void;
 
 const texLoader = new THREE.TextureLoader();
 const gltfLoader = new GLTFLoader();
+const rgbeLoader = new RGBELoader();
 
 function loadTexture(url: string, colorSpace?: THREE.ColorSpace): Promise<THREE.Texture> {
   return new Promise((resolve, reject) => {
@@ -161,20 +163,144 @@ export function normalizeModel(root: THREE.Object3D, maxSize: number): THREE.Obj
   return root;
 }
 
-/** Lean outdoor ground maps (Poly Haven forest_ground_04, 1K). */
+/**
+ * Chopping-block stump (劈柴台): flat cut top + bark cylinder.
+ * Poly Haven tree_stump_02 is a wide root mound — wrong silhouette for
+ * screen.toys/firewood — so we reuse its CC0 PBR maps on a block mesh.
+ */
+export interface PlantedStump {
+  root: THREE.Object3D;
+  /** World Y of the flat chopping face. */
+  topY: number;
+  /** Approximate top radius for physics / pad sizing. */
+  topRadius: number;
+  /** Visual stump height after planting. */
+  height: number;
+}
+
+const STUMP_TEX = {
+  diff: 'assets/models/stump/textures/tree_stump_02_diff_1k.jpg',
+  nor: 'assets/models/stump/textures/tree_stump_02_nor_gl_1k.jpg',
+  arm: 'assets/models/stump/textures/tree_stump_02_arm_1k.jpg',
+};
+
+/** Build a flat-top chopping block; `stumpModel` is kept only as a texture donor (optional). */
+export async function buildChoppingBlock(
+  _stumpModel?: THREE.Object3D,
+): Promise<PlantedStump> {
+  const [diff, nor, arm] = await Promise.all([
+    loadTexture(STUMP_TEX.diff, THREE.SRGBColorSpace),
+    loadTexture(STUMP_TEX.nor).catch(() => null),
+    loadTexture(STUMP_TEX.arm).catch(() => null),
+  ]);
+  // Bark wraps the cylinder side; tighten repeat so rings read as trunk bark.
+  diff.wrapS = diff.wrapT = THREE.RepeatWrapping;
+  diff.repeat.set(1.15, 0.85);
+  if (nor) {
+    nor.wrapS = nor.wrapT = THREE.RepeatWrapping;
+    nor.repeat.copy(diff.repeat);
+  }
+  if (arm) {
+    arm.wrapS = arm.wrapT = THREE.RepeatWrapping;
+    arm.repeat.copy(diff.repeat);
+  }
+
+  const barkMat = new THREE.MeshStandardMaterial({
+    map: diff,
+    normalMap: nor ?? undefined,
+    roughnessMap: arm ?? undefined,
+    roughness: arm ? 1 : 0.9,
+    metalness: 0,
+  });
+  // Flat sawn face — end-grain rings so the chopping face reads clearly.
+  const endMap = await loadTexture('assets/endgrain/toona.png', THREE.SRGBColorSpace).catch(
+    () => null,
+  );
+  if (endMap) {
+    endMap.wrapS = endMap.wrapT = THREE.ClampToEdgeWrapping;
+    endMap.repeat.set(1, 1);
+  }
+  const cutMat = new THREE.MeshStandardMaterial({
+    map: endMap ?? undefined,
+    color: endMap ? 0xffffff : 0xc9a978,
+    roughness: 0.88,
+    metalness: 0,
+  });
+
+  const TOP_R = 0.5;
+  const BOT_R = 0.56;
+  const HEIGHT = 0.52;
+
+  const root = new THREE.Group();
+  root.name = 'chopping-block';
+
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(TOP_R, BOT_R, HEIGHT, 28, 1),
+    barkMat,
+  );
+  body.position.y = HEIGHT * 0.5;
+  body.castShadow = true;
+  body.receiveShadow = true;
+  root.add(body);
+
+  const top = new THREE.Mesh(new THREE.CircleGeometry(TOP_R * 0.995, 32), cutMat);
+  top.rotation.x = -Math.PI / 2;
+  top.position.y = HEIGHT + 0.001;
+  top.receiveShadow = true;
+  root.add(top);
+
+  // Thin rim bevel so the cut edge reads in daylight.
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(TOP_R * 0.97, 0.012, 6, 28),
+    new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.95, metalness: 0 }),
+  );
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = HEIGHT;
+  root.add(rim);
+
+  const topY = HEIGHT;
+  return { root, topY, topRadius: TOP_R, height: HEIGHT };
+}
+
+/** Lean outdoor ground + daytime sky (Poly Haven CC0, mobile-friendly). */
 export interface YardTextures {
   groundDiff: THREE.Texture;
   groundNor: THREE.Texture | null;
+  /** Equirect sky (JPG preferred; HDR optional). */
+  sky: THREE.Texture | null;
 }
 
 export async function loadYardTextures(): Promise<YardTextures> {
-  const [groundDiff, groundNor] = await Promise.all([
+  const [groundDiff, groundNor, sky] = await Promise.all([
     loadTexture('assets/ground/forest_ground_04/diff.jpg', THREE.SRGBColorSpace),
     loadTexture('assets/ground/forest_ground_04/nor.jpg').catch(() => null),
+    // Tonemapped equirect JPG as a sky-dome map (UV). More reliable than
+    // scene.background EquirectangularReflectionMapping on mobile / software GL.
+    loadTexture(
+      'assets/sky/kloofendal_48d_partly_cloudy_puresky/sky_2k.jpg',
+      THREE.SRGBColorSpace,
+    )
+      .then((tex) => {
+        tex.mapping = THREE.UVMapping;
+        tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+        tex.repeat.set(1, 1);
+        return tex;
+      })
+      .catch(async () => {
+        try {
+          const tex = await rgbeLoader.loadAsync(
+            assetUrl('assets/sky/kloofendal_48d_partly_cloudy_puresky/sky_1k.hdr'),
+          );
+          tex.mapping = THREE.EquirectangularReflectionMapping;
+          return tex;
+        } catch {
+          return null;
+        }
+      }),
   ]);
   groundDiff.repeat.set(5.5, 5.5);
   if (groundNor) groundNor.repeat.copy(groundDiff.repeat);
-  return { groundDiff, groundNor };
+  return { groundDiff, groundNor, sky };
 }
 
 export async function preloadContentAssets(
@@ -182,23 +308,24 @@ export async function preloadContentAssets(
   axesList: Axe[],
   onProgress: ProgressFn,
 ): Promise<{
-  stump: THREE.Group;
+  choppingBlock: PlantedStump;
   axes: Map<string, THREE.Group>;
   yard: YardTextures;
 }> {
   const tasks: Array<() => Promise<void>> = [];
   const axes = new Map<string, THREE.Group>();
-  let stump!: THREE.Group;
+  let choppingBlock!: PlantedStump;
   let yard!: YardTextures;
 
   tasks.push(async () => {
-    onProgress(0.05, '树桩模型…');
-    stump = await loadGltf('assets/models/stump/tree_stump_02_1k.gltf');
-    normalizeModel(stump, 1.55);
+    onProgress(0.05, '劈柴台…');
+    // Warm donor GLB (CC0 maps live under models/stump/textures), then build block mesh.
+    await loadGltf('assets/models/stump/tree_stump_02_1k.gltf').catch(() => null);
+    choppingBlock = await buildChoppingBlock();
   });
 
   tasks.push(async () => {
-    onProgress(0.12, '地面…');
+    onProgress(0.12, '地面与天空…');
     yard = await loadYardTextures();
   });
 
@@ -249,5 +376,5 @@ export async function preloadContentAssets(
     onProgress(0.15 + (done / tasks.length) * 0.8, '加载中…');
   }
   onProgress(1, '就绪');
-  return { stump, axes, yard };
+  return { choppingBlock, axes, yard };
 }

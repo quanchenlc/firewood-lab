@@ -77,6 +77,8 @@ export interface FractureWorld {
   } | null;
   /** Align wedged settle height to the visual stump top. */
   setStumpSupportY(y: number): void;
+  /** Rebuild static stump collider to match the visual chopping block. */
+  fitStumpCollider(opts: { topY: number; height: number; radius: number }): void;
   sync(): void;
   /** Fixed-step physics; returns whether a step ran. */
   step(dt: number, weakDevice: boolean): void;
@@ -118,7 +120,9 @@ function smoothstep(u: number): number {
   return t * t * (3 - 2 * t);
 }
 
-export function createFractureWorld(opts?: { stumpSupportY?: number }): FractureWorld {
+export function createFractureWorld(
+  opts?: { stumpSupportY?: number; stumpHeight?: number; stumpRadius?: number },
+): FractureWorld {
   const world = new CANNON.World({
     gravity: new CANNON.Vec3(0, -11.5, 0),
   });
@@ -154,14 +158,12 @@ export function createFractureWorld(opts?: { stumpSupportY?: number }): Fracture
   ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
   world.addBody(ground);
 
-  // Heavier static stump stack: wide cylinder + thick top pad for chips to rest on
+  // Static chopping-block collider — rebuilt via fitStumpCollider to match visuals.
   const stump = new CANNON.Body({
     mass: 0,
     material: groundMat,
-    position: new CANNON.Vec3(0, 0.22, 0),
+    position: new CANNON.Vec3(0, 0.28, 0),
   });
-  stump.addShape(new CANNON.Cylinder(0.78, 0.92, 0.44, 10));
-  stump.addShape(new CANNON.Box(new CANNON.Vec3(0.7, 0.05, 0.7)), new CANNON.Vec3(0, 0.24, 0));
   world.addBody(stump);
 
   const fragments: PhysFragment[] = [];
@@ -174,7 +176,37 @@ export function createFractureWorld(opts?: { stumpSupportY?: number }): Fracture
   // keep scale near 1 so face-grain doesn't micro-tile into a moiré.
   sliceOpts.textureScale.set(1, 1);
   /** World Y of the chopping-block top — measured from the visual stump mesh. */
-  let stumpSupportY = opts?.stumpSupportY ?? 0.45;
+  let stumpSupportY = opts?.stumpSupportY ?? 0.56;
+
+  function fitStumpCollider(next: { topY: number; height: number; radius: number }): void {
+    const height = Math.max(0.28, next.height);
+    const radius = Math.max(0.35, next.radius);
+    const topY = next.topY;
+    // Center the cylinder so its top face sits at topY.
+    const cylH = Math.min(height * 0.95, Math.max(0.24, topY - 0.02));
+    const centerY = topY - cylH * 0.5;
+    while (stump.shapes.length > 0) {
+      stump.removeShape(stump.shapes[0]!);
+    }
+    stump.position.set(0, centerY, 0);
+    // Slight taper: flat cut top, roots a bit wider.
+    stump.addShape(new CANNON.Cylinder(radius, radius * 1.12, cylH, 12));
+    stump.addShape(
+      new CANNON.Box(new CANNON.Vec3(radius * 0.92, 0.045, radius * 0.92)),
+      new CANNON.Vec3(0, cylH * 0.5 + 0.02, 0),
+    );
+    stump.updateBoundingRadius();
+    // cannon-es Body AABB refresh
+    stump.aabbNeedsUpdate = true;
+    stumpSupportY = topY;
+  }
+
+  fitStumpCollider({
+    topY: stumpSupportY,
+    height: opts?.stumpHeight ?? 0.56,
+    radius: opts?.stumpRadius ?? 0.48,
+  });
+
   const _tiltQ = new THREE.Quaternion();
   const _yawQ = new THREE.Quaternion();
   const _outQ = new THREE.Quaternion();
@@ -1038,6 +1070,7 @@ export function createFractureWorld(opts?: { stumpSupportY?: number }): Fracture
     setStumpSupportY(y: number) {
       stumpSupportY = y;
     },
+    fitStumpCollider,
     sync,
     step,
     clearFragments,

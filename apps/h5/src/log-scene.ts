@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import { DestructibleMesh } from '@dgreenheck/three-pinata';
 import type { ChopOutcome, FracturePlan, Species } from '@firewood/game-core';
-import { loadSpeciesMaterials, type SpeciesMaterials, type YardTextures } from './assets';
+import {
+  loadSpeciesMaterials,
+  type PlantedStump,
+  type SpeciesMaterials,
+  type YardTextures,
+} from './assets';
 import { createFractureWorld, type FractureWorld, type PhysFragment } from './fracture-world';
 
 export interface LogScene {
@@ -143,7 +148,7 @@ function addYardDebris(scene: THREE.Scene, opts: { weak: boolean }): void {
   for (let i = 0; i < count; i++) {
     const ang = yardRand(seed) * Math.PI * 2;
     // Prefer a ring around the stump; keep clear of the log footprint.
-    const rad = 0.95 + yardRand(seed) * 2.4 + (i % 5) * 0.08;
+    const rad = 0.85 + yardRand(seed) * 2.4 + (i % 5) * 0.08;
     const x = Math.cos(ang) * rad;
     const z = Math.sin(ang) * rad;
     const sx = 0.05 + yardRand(seed) * 0.11;
@@ -209,7 +214,7 @@ function addYardDebris(scene: THREE.Scene, opts: { weak: boolean }): void {
 
 export function createLogScene(
   canvas: HTMLCanvasElement,
-  stumpModel: THREE.Object3D,
+  choppingBlock: PlantedStump,
   opts: { weakDevice?: boolean; yard?: YardTextures } = {},
 ): LogScene {
   const weak = !!opts.weakDevice;
@@ -227,14 +232,14 @@ export function createLogScene(
   renderer.toneMappingExposure = weak ? 1.45 : 1.62;
 
   const scene = new THREE.Scene();
-  // Soft daylight haze instead of dark void.
-  scene.fog = new THREE.Fog(0xd2dec8, 14, 32);
-  scene.background = new THREE.Color(0xd5e4cf);
+  // Soft daylight haze — pushed out so the equirect sky stays readable.
+  scene.fog = new THREE.Fog(0xb9cce0, 16, 38);
+  scene.background = new THREE.Color(0xb9cce0);
 
-  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 50);
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 80);
   let yaw = 0.7;
   let pitch = 0.38;
-  const lookAt = new THREE.Vector3(0, 0.7, 0);
+  const lookAt = new THREE.Vector3(0, 0.85, 0);
   const camRadius = 4.4;
 
   // Bright hemisphere: warm sky + greenish ground bounce.
@@ -251,6 +256,29 @@ export function createLogScene(
 
   // Textured forest ground (lean 1K maps). Fall back to tinted plane if missing.
   const yard = opts.yard;
+  if (yard?.sky) {
+    // Sky dome (inward sphere) — daytime outdoor, not flat fog void.
+    // Prefer mesh map over scene.background equirect for mobile/software GL.
+    if (yard.sky.mapping === THREE.EquirectangularReflectionMapping) {
+      scene.background = yard.sky;
+    } else {
+      const skyDome = new THREE.Mesh(
+        new THREE.SphereGeometry(48, weak ? 24 : 40, weak ? 12 : 20),
+        new THREE.MeshBasicMaterial({
+          map: yard.sky,
+          side: THREE.BackSide,
+          depthWrite: false,
+          fog: false,
+        }),
+      );
+      skyDome.frustumCulled = false;
+      scene.add(skyDome);
+      scene.background = new THREE.Color(0x8fb0d4);
+    }
+    // Very light haze only — keep clouds readable on mobile.
+    scene.fog = new THREE.Fog(0xc8d4e6, 32, 75);
+  }
+
   const groundMat = new THREE.MeshStandardMaterial({
     map: yard?.groundDiff,
     normalMap: yard?.groundNor ?? undefined,
@@ -265,41 +293,28 @@ export function createLogScene(
   ground.receiveShadow = false;
   scene.add(ground);
 
-  // Packed earth pad under the chopping block so stump reads planted.
+  addYardDebris(scene, { weak });
+
+  // Hierarchy: ground → stump chopping block (flat cut top) → upright round on face.
+  const planted = choppingBlock;
+  const stump = planted.root;
+  scene.add(stump);
+  stump.updateMatrixWorld(true);
+  const stumpTopY = planted.topY;
+  const logCenterY = stumpTopY + LOG_HEIGHT * 0.5 + 0.002;
+
+  // Thin packed-earth ring under the stump only (not a dirt hill the log sits on).
   const pad = new THREE.Mesh(
-    new THREE.CircleGeometry(1.15, 40),
+    new THREE.CircleGeometry(Math.max(0.55, planted.topRadius * 1.2), 36),
     new THREE.MeshStandardMaterial({
-      color: 0x9a7d5c,
+      color: 0x8a6f52,
       roughness: 1,
       metalness: 0,
     }),
   );
   pad.rotation.x = -Math.PI / 2;
-  pad.position.y = 0.005;
+  pad.position.y = 0.004;
   scene.add(pad);
-
-  addYardDebris(scene, { weak });
-
-  // Real stump GLB (visual only) — Poly Haven tree_stump_02 is already upright (Y = height).
-  const stump = stumpModel;
-  stump.position.set(0, 0.26, 0);
-  scene.add(stump);
-  stump.updateMatrixWorld(true);
-  // Sit the round on the measured stump crown. Prefer a center ray hit so we
-  // land on the flat chopping face (bbox.max can be a high bark nub).
-  const stumpBox = new THREE.Box3().setFromObject(stump);
-  let stumpTopY = stumpBox.max.y - 0.02;
-  {
-    const ray = new THREE.Raycaster(
-      new THREE.Vector3(0, stumpBox.max.y + 1.5, 0),
-      new THREE.Vector3(0, -1, 0),
-    );
-    const hits = ray.intersectObject(stump, true);
-    if (hits[0]) {
-      stumpTopY = hits[0].point.y + 0.005;
-    }
-  }
-  const logCenterY = stumpTopY + LOG_HEIGHT * 0.5 + 0.01;
 
   let mats: SpeciesMaterials | null = null;
   let logMesh = createLogProxy();
@@ -362,8 +377,17 @@ export function createLogScene(
   nickMark.visible = false;
   scene.add(nickMark);
 
-  const fracture = createFractureWorld({ stumpSupportY: stumpTopY });
+  const fracture = createFractureWorld({
+    stumpSupportY: stumpTopY,
+    stumpHeight: planted.height,
+    stumpRadius: planted.topRadius,
+  });
   fracture.setStumpSupportY(stumpTopY);
+  fracture.fitStumpCollider({
+    topY: stumpTopY,
+    height: planted.height,
+    radius: planted.topRadius,
+  });
   let shake = 0;
   let punch = 0;
   let nickT = -1;
