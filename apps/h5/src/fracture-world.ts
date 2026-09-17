@@ -475,16 +475,12 @@ export function createFractureWorld(): FractureWorld {
     return true;
   }
 
-  /** Pre-split log diameter from the just-sliced leaf union (XZ extent). */
-  function estimateLogDiameter(pieces: DestructibleMesh[]): number {
-    const box = new THREE.Box3();
-    for (const p of pieces) {
-      p.updateMatrixWorld(true);
-      box.expandByObject(p);
-    }
+  /** Horizontal diameter of the piece about to be cleaved (pre-slice). */
+  function meshDiameterXZ(mesh: THREE.Object3D): number {
+    mesh.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(mesh);
     const size = box.getSize(new THREE.Vector3());
-    // Cylinder halves still span the original diameter in XZ before bounce.
-    return Math.max(0.2, Math.hypot(size.x, size.z) * 0.92, Math.max(size.x, size.z));
+    return Math.max(0.25, size.x, size.z);
   }
 
   function registerPieces(
@@ -494,11 +490,11 @@ export function createFractureWorld(): FractureWorld {
     plan: FracturePlan,
     generation: number,
     scene: THREE.Scene,
+    logDiameter: number,
   ): PhysFragment[] {
     const created: PhysFragment[] = [];
     const now = performance.now();
     const settleMs = plan.bounceMs + 40;
-    const logDiameter = estimateLogDiameter(pieces);
     // plan.wedgeGap is face-gap fraction of diameter; each half slides half of that.
     const sideOffset = lateralOffsetFromDiameter(logDiameter, plan.wedgeGap);
 
@@ -517,19 +513,22 @@ export function createFractureWorld(): FractureWorld {
 
       const body = makeBodyFromMesh(fragment, plan.messy ? 1.15 : 1.35, onStump);
 
-      // pushDir = horizontal vector from impact → piece centroid (reference performSplit).
-      let pushX = center0.x - worldImpact.x;
-      let pushZ = center0.z - worldImpact.z;
-      let pushLen = Math.hypot(pushX, pushZ);
+      // Prefer ±cleave normal so halves mirror-slide apart (reference upright 错开).
+      // Fall back to impact→centroid if the piece sits on the plane.
+      let side = Math.sign(
+        (center0.x - worldImpact.x) * planeNormal.x + (center0.z - worldImpact.z) * planeNormal.z,
+      );
+      if (side === 0) side = i % 2 === 0 ? 1 : -1;
+      let pushX = planeNormal.x * side;
+      let pushZ = planeNormal.z * side;
+      const pushLen = Math.hypot(pushX, pushZ);
       if (pushLen < 1e-5) {
-        // Degenerate: fall back to ±cleave normal by index.
-        const side = i % 2 === 0 ? 1 : -1;
-        pushX = planeNormal.x * side;
-        pushZ = planeNormal.z * side;
-        pushLen = 1;
+        pushX = side;
+        pushZ = 0;
+      } else {
+        pushX /= pushLen;
+        pushZ /= pushLen;
       }
-      pushX /= pushLen;
-      pushZ /= pushLen;
 
       // Keep slice orientation as-is (Y-up cylinder halves stay upright on the stump).
       body.quaternion.set(
@@ -630,6 +629,7 @@ export function createFractureWorld(): FractureWorld {
     if (plan.fragmentCount <= 0 || plan.nickOnly) return [];
 
     mesh.updateMatrixWorld(true);
+    const logDiameter = meshDiameterXZ(mesh);
     const locked = opts?.planeNormal;
     const planeNormal = locked
       ? new THREE.Vector3(locked.x, 0, locked.z).normalize()
@@ -656,7 +656,15 @@ export function createFractureWorld(): FractureWorld {
 
     if (pieces.length === 0) return [];
 
-    const created = registerPieces(pieces, worldImpact, planeNormal, plan, generation, scene);
+    const created = registerPieces(
+      pieces,
+      worldImpact,
+      planeNormal,
+      plan,
+      generation,
+      scene,
+      logDiameter,
+    );
 
     mesh.visible = false;
     mesh.removeFromParent();

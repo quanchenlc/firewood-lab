@@ -520,7 +520,7 @@ async function boot(): Promise<void> {
     /** Stump-piece horizontal centers + pairwise gap (for bounce/offset checks). */
     stumpGap: () => {
       const stump = logScene.fracture.fragments.filter((f) => f.onStump && f.mesh.visible);
-      const centers = stump.map((f) => {
+      const boxes = stump.map((f) => {
         const box = new THREE.Box3().setFromObject(f.mesh);
         const c = box.getCenter(new THREE.Vector3());
         const s = box.getSize(new THREE.Vector3());
@@ -529,29 +529,46 @@ async function boot(): Promise<void> {
           y: c.y,
           z: c.z,
           bouncing: !!f.bounce,
-          halfWidth: Math.hypot(s.x, s.z) * 0.5,
+          minX: box.min.x,
+          maxX: box.max.x,
+          minZ: box.min.z,
+          maxZ: box.max.z,
+          sizeX: s.x,
+          sizeZ: s.z,
         };
       });
       let maxGap = 0;
       let faceGap = 0;
-      for (let i = 0; i < centers.length; i++) {
-        for (let j = i + 1; j < centers.length; j++) {
-          const d = Math.hypot(centers[i]!.x - centers[j]!.x, centers[i]!.z - centers[j]!.z);
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i]!;
+          const b = boxes[j]!;
+          const d = Math.hypot(a.x - b.x, a.z - b.z);
           if (d > maxGap) maxGap = d;
-          const faces = Math.max(0, d - centers[i]!.halfWidth - centers[j]!.halfWidth);
+          // AABB face gap along the stronger separation axis.
+          const gapX = Math.max(0, Math.max(a.minX, b.minX) - Math.min(a.maxX, b.maxX));
+          const gapZ = Math.max(0, Math.max(a.minZ, b.minZ) - Math.min(a.maxZ, b.maxZ));
+          // When boxes are separated on one axis, the gap is the positive separation.
+          const sepX = a.maxX < b.minX ? b.minX - a.maxX : b.maxX < a.minX ? a.minX - b.maxX : 0;
+          const sepZ = a.maxZ < b.minZ ? b.minZ - a.maxZ : b.maxZ < a.minZ ? a.minZ - b.maxZ : 0;
+          const faces = Math.max(sepX, sepZ, gapX, gapZ);
           if (faces > faceGap) faceGap = faces;
         }
       }
-      // Approximate original diameter from two halves: center distance + half-widths.
+      const spanX = Math.max(...boxes.map((b) => b.maxX), 0) - Math.min(...boxes.map((b) => b.minX), 0);
+      const spanZ = Math.max(...boxes.map((b) => b.maxZ), 0) - Math.min(...boxes.map((b) => b.minZ), 0);
+      const outerSpan = Math.max(spanX, spanZ);
+      // Original diameter ≈ outer span − face gap for a 2-piece bipartition.
       const approxDiameter =
-        centers.length >= 2 ? maxGap + Math.min(...centers.map((c) => c.halfWidth)) * 0.15 : 0;
+        boxes.length === 2 && faceGap > 0 ? Math.max(0.2, outerSpan - faceGap) : Math.max(outerSpan * 0.7, 0.2);
       return {
         count: stump.length,
-        centers,
+        centers: boxes,
         maxGap,
         faceGap,
         approxDiameter,
-        faceGapFrac: approxDiameter > 1e-6 ? faceGap / approxDiameter : 0,
+        faceGapFrac: faceGap / approxDiameter,
+        sideOffsetHint: faceGap / 2,
       };
     },
     /** Freeze axe at vertical impact pose over the log (for screenshot tests). */
