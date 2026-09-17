@@ -202,7 +202,7 @@ export function createFractureWorld(
    * (reference screen.toys/firewood), not a snappy “pop” across the yard.
    *
    * Before (#16 escape-top): HX 2.05–2.90, VY 2.05–2.75, CLEAR_R 0.48 → radial≈1.6–2.3
-   * After (soft drop):       HX 0.65–0.95, VY 0.55–0.85, CLEAR_R 0.42 → near-rim / inner yard
+   * After (soft drop):       HX 0.50–0.72, VY 0.42–0.64, CLEAR_R 0.42 → near-rim / inner yard
    * Still starts just past the stump collider so chips don’t park on the top.
    */
   const FIREWOOD_TOSS_SETTLE_MS = 1600;
@@ -210,13 +210,13 @@ export function createFractureWorld(
   const FIREWOOD_TOSS_LIFT = 0.06;
   /** Radial clear past stump top before impulse (visual R≈0.32, collider ≥0.35). */
   const FIREWOOD_TOSS_CLEAR_R = 0.42;
-  const FIREWOOD_TOSS_HX = 0.65;
-  const FIREWOOD_TOSS_HX_JIT = 0.3;
-  const FIREWOOD_TOSS_VY = 0.55;
-  const FIREWOOD_TOSS_VY_JIT = 0.3;
+  const FIREWOOD_TOSS_HX = 0.5;
+  const FIREWOOD_TOSS_HX_JIT = 0.22;
+  const FIREWOOD_TOSS_VY = 0.42;
+  const FIREWOOD_TOSS_VY_JIT = 0.22;
   /** Tip/roll rate (rad/s) — outward tip, not random cannon spin. */
-  const FIREWOOD_TOSS_TIP = 1.15;
-  const FIREWOOD_TOSS_TIP_JIT = 0.85;
+  const FIREWOOD_TOSS_TIP = 0.9;
+  const FIREWOOD_TOSS_TIP_JIT = 0.55;
 
   function fitStumpCollider(next: { topY: number; height: number; radius: number }): void {
     const height = Math.max(0.28, next.height);
@@ -1249,7 +1249,7 @@ export function createFractureWorld(
       ensureDynamicBody(f);
       // Round-end: same soft clear + short drop, slightly wider than chip toss.
       const { ox, oz } = clearStumpForToss(f);
-      const hx = 0.95 + Math.random() * 0.45;
+      const hx = 0.75 + Math.random() * 0.35;
       const tip = FIREWOOD_TOSS_TIP + Math.random() * FIREWOOD_TOSS_TIP_JIT;
       f.body.velocity.set(
         ox * hx + (Math.random() - 0.5) * 0.22,
