@@ -129,6 +129,14 @@ export function classifyBarkEdgeCase(
 /**
  * Map normalized chord U∈[0,1] into the bark-edge atlas.
  *
+ * Mirrors screen.toys insidegrain CASE A/B/C (logic only — no their textures):
+ *   A → U = u
+ *   B_left → U = u * le
+ *   B_right → U = 1 - (1-u) * le
+ *   C → mid-strip; ref `(1-le)/2+u*le` still hits bark when le≈1, so we
+ *       prefer an explicit inset by `BARK_EDGE_U_FRAC` (optionally le-scaled
+ *       *within* the grain band).
+ *
  * @param chordCover `le` in ref — min(1, faceChord / estimatedFullChord).
  *   <1 when the face is narrower than a diameter (wedge / off-center).
  */
@@ -149,12 +157,37 @@ export function applyBarkEdgeCaseU(
     case 'B_right':
       // Bark only on the high-U end → sample [1-le, 1].
       return 1 - (1 - u) * le;
-    case 'C':
-      // Interior face: grain mid-strip only (skip both bark rims).
-      return (1 - le) / 2 + u * le;
+    case 'C': {
+      // Interior face: never sample atlas bark strips.
+      const inset = BARK_EDGE_U_FRAC;
+      const grain = Math.max(1e-6, 1 - 2 * inset);
+      const span = Math.max(1e-6, le * grain);
+      const start = inset + (grain - span) * 0.5;
+      return start + u * span;
+    }
     default:
       return u;
   }
+}
+
+/**
+ * Right-handed cutCap axes matching pinata fill U/V:
+ *   plane +X = tangent (U), +Y = bitangent (V), +Z = -localN
+ * because `tangent × bitangent = -localN` for Y-up cleaves.
+ *
+ * Using `setFromUnitVectors(Z→localN)` alone leaves twist free and often
+ * aligns plane +X with **-tangent** (dot ≈ -1) → CASE B bark on the wrong side.
+ */
+export function cutCapAxesFromCleave(
+  tangent: Vec3,
+  bitangent: Vec3,
+  localN: Vec3,
+): { x: Vec3; y: Vec3; z: Vec3 } {
+  return {
+    x: { x: tangent.x, y: tangent.y, z: tangent.z },
+    y: { x: bitangent.x, y: bitangent.y, z: bitangent.z },
+    z: { x: -localN.x, y: -localN.y, z: -localN.z },
+  };
 }
 
 /**

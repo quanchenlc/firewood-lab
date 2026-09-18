@@ -49,6 +49,9 @@ import {
   normalizePushXZ,
   planFracture,
   planRingPileSlots,
+  appendRingPileSlots,
+  createRingPileOccupancy,
+  clearRingPileOccupancy,
   pickRingPileNextSlot,
   rotateOffsetAroundAxis,
   sampleTipDropPose,
@@ -734,6 +737,53 @@ describe('planRingPileSlots (reference FirewoodPile arc)', () => {
     const next = pickRingPileNextSlot(filled, tops, -1);
     assert.equal(next.x, -0.5);
     assert.equal(next.y, 1);
+  });
+
+  it('appendRingPileSlots is append-only (prior slots stay; occupancy grows)', () => {
+    const occ = createRingPileOccupancy();
+    const halves = Array.from({ length: 4 }, () => 0.05);
+    const rnds = Array.from({ length: 14 }, () => 0.5);
+    const first = appendRingPileSlots(4, occ, {
+      halfHeights: halves,
+      halfWidths: halves,
+      rnds,
+    });
+    assert.equal(first.length, 4);
+    assert.equal(occ.filledSlots.size, 4);
+    const snapshot = first.map((s) => ({ x: s.x, y: s.y, z: s.z, slotX: s.slotX, slotGridY: s.slotGridY }));
+    const second = appendRingPileSlots(3, occ, {
+      halfHeights: Array.from({ length: 3 }, () => 0.05),
+      halfWidths: Array.from({ length: 3 }, () => 0.05),
+      rnds: rnds.slice(8),
+    });
+    assert.equal(second.length, 3);
+    assert.equal(occ.filledSlots.size, 7);
+    // First batch world poses unchanged (we only returned new slots).
+    for (let i = 0; i < snapshot.length; i++) {
+      assert.equal(snapshot[i]!.x, first[i]!.x);
+      assert.equal(snapshot[i]!.y, first[i]!.y);
+      assert.equal(snapshot[i]!.z, first[i]!.z);
+    }
+    // New slots use distinct grid keys.
+    const keys = new Set([
+      ...first.map((s) => `${s.slotX.toFixed(1)},${s.slotGridY}`),
+      ...second.map((s) => `${s.slotX.toFixed(1)},${s.slotGridY}`),
+    ]);
+    assert.equal(keys.size, 7);
+  });
+
+  it('clearRingPileOccupancy resets for a fresh pile', () => {
+    const occ = createRingPileOccupancy();
+    appendRingPileSlots(2, occ, {
+      halfHeights: [0.05, 0.05],
+      halfWidths: [0.05, 0.05],
+      rnds: [0.5, 0.5, 0.5, 0.5],
+    });
+    assert.ok(occ.filledSlots.size > 0);
+    clearRingPileOccupancy(occ);
+    assert.equal(occ.filledSlots.size, 0);
+    assert.equal(occ.tier, 0);
+    assert.equal(occ.minGx, 1);
   });
 });
 

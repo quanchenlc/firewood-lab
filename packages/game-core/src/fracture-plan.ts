@@ -412,36 +412,64 @@ export function pickRingPileNextSlot(
   return candidates[0]!;
 }
 
+/** Mutable XC-grid occupancy — persists across rounds so stacked pieces stay put. */
+export interface RingPileOccupancy {
+  filledSlots: Set<string>;
+  slotTops: Map<string, number>;
+  minGx: number;
+  maxGx: number;
+  tier: number;
+}
+
+export function createRingPileOccupancy(): RingPileOccupancy {
+  return {
+    filledSlots: new Set(),
+    slotTops: new Map(),
+    minGx: 1,
+    maxGx: -1,
+    tier: 0,
+  };
+}
+
+export function clearRingPileOccupancy(occ: RingPileOccupancy): void {
+  occ.filledSlots.clear();
+  occ.slotTops.clear();
+  occ.minGx = 1;
+  occ.maxGx = -1;
+  occ.tier = 0;
+}
+
+export type RingPilePlanOpts = {
+  radius?: number;
+  startAngle?: number;
+  arcSpan?: number;
+  tierDepth?: number;
+  maxPerTier?: number;
+  maxStackH?: number;
+  slotWidth?: number;
+  groundYBase?: number;
+  /** Per-piece half-thickness (metres) for ground Y; defaults to 0.05. */
+  halfHeights?: number[];
+  /** Approximate half-width along the arc (metres); unused for XC grid (kept for API). */
+  halfWidths?: number[];
+  /** Local AABB sizes for `_simToWorld` thin-axis / grain (metres). */
+  sizeXs?: number[];
+  sizeYs?: number[];
+  sizeZs?: number[];
+  /** Per-piece thin-axis override (length ≥ count). */
+  isXThinners?: boolean[];
+  /** Injected [0,1) samples for jitter (length ≥ count*2 preferred). */
+  rnds?: number[];
+};
+
 /**
- * Plan neat crescent/annulus slots for finished firewood around the stump.
- * Mirrors reference FirewoodPile slot grid (XC units) + `_simToWorld` mapping:
- * pack side-by-side from arc start, stack up on adjacent pairs, overflow → outer tier.
- * Never places inside the stump footprint (radius ≫ stump ~0.34).
+ * Append `count` new slots into an existing occupancy table (reference append-only).
+ * Mutates `occ`. Already-filled slots are not reassigned.
  */
-export function planRingPileSlots(
+export function appendRingPileSlots(
   count: number,
-  opts?: {
-    radius?: number;
-    startAngle?: number;
-    arcSpan?: number;
-    tierDepth?: number;
-    maxPerTier?: number;
-    maxStackH?: number;
-    slotWidth?: number;
-    groundYBase?: number;
-    /** Per-piece half-thickness (metres) for ground Y; defaults to 0.05. */
-    halfHeights?: number[];
-    /** Approximate half-width along the arc (metres); unused for XC grid (kept for API). */
-    halfWidths?: number[];
-    /** Local AABB sizes for `_simToWorld` thin-axis / grain (metres). */
-    sizeXs?: number[];
-    sizeYs?: number[];
-    sizeZs?: number[];
-    /** Per-piece thin-axis override (length ≥ count). */
-    isXThinners?: boolean[];
-    /** Injected [0,1) samples for jitter (length ≥ count*2 preferred). */
-    rnds?: number[];
-  },
+  occ: RingPileOccupancy,
+  opts?: RingPilePlanOpts,
 ): RingPileSlot[] {
   const n = Math.max(0, Math.floor(count));
   if (n === 0) return [];
@@ -454,17 +482,11 @@ export function planRingPileSlots(
   const groundBase = opts?.groundYBase ?? 0;
   const slots: RingPileSlot[] = [];
 
-  const filledSlots = new Set<string>();
-  const slotTops = new Map<string, number>();
-  let minGx = 1;
-  let maxGx = -1;
-  let tier = 0;
-
   const resetTierGrid = (): void => {
-    filledSlots.clear();
-    slotTops.clear();
-    minGx = 1;
-    maxGx = -1;
+    occ.filledSlots.clear();
+    occ.slotTops.clear();
+    occ.minGx = 1;
+    occ.maxGx = -1;
   };
 
   for (let i = 0; i < n; i++) {
@@ -479,33 +501,33 @@ export function planRingPileSlots(
         : Math.min(sizeX, sizeZ),
     );
 
-    let slot = pickRingPileNextSlot(filledSlots, slotTops, minGx, maxStackH);
-    const rad = baseR + tier * tierDepth;
+    let slot = pickRingPileNextSlot(occ.filledSlots, occ.slotTops, occ.minGx, maxStackH);
+    const rad = baseR + occ.tier * tierDepth;
     const maxArc = span * rad;
     // Arc capacity exceeded → outer tier (reference `_needsTierAdvance`).
-    if (filledSlots.size > 0 && Math.abs(slot.x * xc) >= maxArc) {
-      tier += 1;
+    if (occ.filledSlots.size > 0 && Math.abs(slot.x * xc) >= maxArc) {
+      occ.tier += 1;
       resetTierGrid();
-      slot = pickRingPileNextSlot(filledSlots, slotTops, minGx, maxStackH);
+      slot = pickRingPileNextSlot(occ.filledSlots, occ.slotTops, occ.minGx, maxStackH);
     }
 
     let physicalBaseY = 0;
     if (slot.y > 0) {
-      const leftTop = slotTops.get(`${(slot.x - 0.5).toFixed(1)},${slot.y - 1}`) ?? 0;
-      const rightTop = slotTops.get(`${(slot.x + 0.5).toFixed(1)},${slot.y - 1}`) ?? 0;
+      const leftTop = occ.slotTops.get(`${(slot.x - 0.5).toFixed(1)},${slot.y - 1}`) ?? 0;
+      const rightTop = occ.slotTops.get(`${(slot.x + 0.5).toFixed(1)},${slot.y - 1}`) ?? 0;
       physicalBaseY = Math.max(leftTop, rightTop);
     }
 
     const key = `${slot.x.toFixed(1)},${slot.y}`;
-    filledSlots.add(key);
-    slotTops.set(key, physicalBaseY + T);
-    maxGx = Math.max(maxGx, slot.x);
-    minGx = Math.min(minGx, slot.x);
+    occ.filledSlots.add(key);
+    occ.slotTops.set(key, physicalBaseY + T);
+    occ.maxGx = Math.max(occ.maxGx, slot.x);
+    occ.minGx = Math.min(occ.minGx, slot.x);
 
     const rndA = opts?.rnds?.[i * 2] ?? 0.5;
     const rndB = opts?.rnds?.[i * 2 + 1] ?? 0.5;
     const radJit = (rndA - 0.5) * 2 * RING_PILE_RADIAL_JIT;
-    const tierR = baseR + tier * tierDepth;
+    const tierR = baseR + occ.tier * tierDepth;
     const simX = slot.x * xc;
     // Reference: angle = startAngle + simX / (radius + tierDepth)
     const ang = start + simX / Math.max(1e-6, tierR);
@@ -529,7 +551,7 @@ export function planRingPileSlots(
       y,
       z: oz * r,
       yaw: ang,
-      tier,
+      tier: occ.tier,
       roll,
       isXThinner: orient.isXThinner,
       slotX: slot.x,
@@ -541,6 +563,22 @@ export function planRingPileSlots(
     });
   }
   return slots;
+}
+
+/**
+ * Plan neat crescent/annulus slots for finished firewood around the stump.
+ * Mirrors reference FirewoodPile slot grid (XC units) + `_simToWorld` mapping:
+ * pack side-by-side from arc start, stack up on adjacent pairs, overflow → outer tier.
+ * Never places inside the stump footprint (radius ≫ stump ~0.34).
+ *
+ * Fresh plan from empty occupancy. For multi-round append, use
+ * `appendRingPileSlots` with a persisted `RingPileOccupancy`.
+ */
+export function planRingPileSlots(
+  count: number,
+  opts?: RingPilePlanOpts,
+): RingPileSlot[] {
+  return appendRingPileSlots(count, createRingPileOccupancy(), opts);
 }
 
 export interface FracturePlan {
