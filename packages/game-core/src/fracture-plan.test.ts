@@ -41,10 +41,13 @@ import {
   planFracture,
   planRingPileSlots,
   pickRingPileNextSlot,
+  rotateOffsetAroundAxis,
   sampleTipDropPose,
   settlePositionY,
   shouldTossOnTooThin,
   thicknessInchesAlong,
+  tipDropHingePoint,
+  tipDropOutwardAxis,
   tipDropRestPose,
   volumeInchesFromBBox,
   YARD_GROUND_Y,
@@ -341,52 +344,144 @@ describe('tipDropRestPose / sampleTipDropPose', () => {
     assert.ok(rest.toY >= 0.04);
   });
 
-  it('sample is continuous from→to with outward tip and soft mid arc', () => {
+  it('Option B: hinge tip is continuous, outward, and has no mid-arc lift', () => {
+    assert.equal(TIP_DROP_ARC_HEIGHT, 0);
+
+    const hingeX = 0.2;
+    const hingeY = 0.34;
+    const hingeZ = 0;
+    const fromX = 0.1;
+    const fromY = 0.5;
+    const fromZ = 0;
+    const toX = 0.6;
+    const toY = 0.08;
+    const toZ = 0;
+    const tipRad = Math.PI / 2;
+
     const start = sampleTipDropPose({
       u: 0,
-      fromX: 0.1,
-      fromY: 0.5,
-      fromZ: 0,
-      toX: 0.6,
-      toY: 0.08,
-      toZ: 0,
-      tipRad: Math.PI / 2,
+      fromX,
+      fromY,
+      fromZ,
+      toX,
+      toY,
+      toZ,
+      tipRad,
+      hingeX,
+      hingeY,
+      hingeZ,
+      dirX: 1,
+      dirZ: 0,
       arcHeight: TIP_DROP_ARC_HEIGHT,
     });
-    assert.ok(Math.abs(start.x - 0.1) < 1e-9);
+    assert.ok(Math.abs(start.x - fromX) < 1e-9);
+    assert.ok(Math.abs(start.y - fromY) < 1e-9);
     assert.ok(Math.abs(start.tipRad) < 1e-9);
 
     const mid = sampleTipDropPose({
       u: 0.5,
-      fromX: 0.1,
-      fromY: 0.5,
-      fromZ: 0,
-      toX: 0.6,
-      toY: 0.08,
-      toZ: 0,
-      tipRad: Math.PI / 2,
+      fromX,
+      fromY,
+      fromZ,
+      toX,
+      toY,
+      toZ,
+      tipRad,
+      hingeX,
+      hingeY,
+      hingeZ,
+      dirX: 1,
+      dirZ: 0,
       arcHeight: TIP_DROP_ARC_HEIGHT,
     });
-    assert.ok(mid.x > 0.1 && mid.x < 0.6);
-    assert.ok(mid.tipRad > 0 && mid.tipRad < Math.PI / 2);
-    // Soft arc lifts mid Y above the pure lerp.
-    const lerpY = 0.5 + (0.08 - 0.5) * mid.ease;
-    assert.ok(mid.y > lerpY);
+    assert.ok(mid.tipRad > 0 && mid.tipRad < tipRad);
+    // Top tips with push (+X): mid center should move outward past start.
+    assert.ok(mid.x > fromX);
+    // Pure hinge — no CoM arc lift above the hinge-rotated path (arcHeight=0).
+    const axis = tipDropOutwardAxis(1, 0);
+    const midRot = rotateOffsetAroundAxis(
+      fromX - hingeX,
+      fromY - hingeY,
+      fromZ - hingeZ,
+      axis.ax,
+      axis.ay,
+      axis.az,
+      mid.tipRad,
+    );
+    const endRot = rotateOffsetAroundAxis(
+      fromX - hingeX,
+      fromY - hingeY,
+      fromZ - hingeZ,
+      axis.ax,
+      axis.ay,
+      axis.az,
+      tipRad,
+    );
+    const slideY = toY - (hingeY + endRot.y);
+    const expectedY = hingeY + midRot.y + slideY * mid.ease;
+    assert.ok(Math.abs(mid.y - expectedY) < 1e-9);
 
     const end = sampleTipDropPose({
       u: 1,
-      fromX: 0.1,
-      fromY: 0.5,
-      fromZ: 0,
-      toX: 0.6,
-      toY: 0.08,
-      toZ: 0,
-      tipRad: Math.PI / 2,
+      fromX,
+      fromY,
+      fromZ,
+      toX,
+      toY,
+      toZ,
+      tipRad,
+      hingeX,
+      hingeY,
+      hingeZ,
+      dirX: 1,
+      dirZ: 0,
       arcHeight: TIP_DROP_ARC_HEIGHT,
     });
-    assert.ok(Math.abs(end.x - 0.6) < 1e-9);
-    assert.ok(Math.abs(end.y - 0.08) < 1e-9);
-    assert.ok(Math.abs(end.tipRad - Math.PI / 2) < 1e-9);
+    assert.ok(Math.abs(end.x - toX) < 1e-9);
+    assert.ok(Math.abs(end.y - toY) < 1e-9);
+    assert.ok(Math.abs(end.tipRad - tipRad) < 1e-9);
+  });
+
+  it('outward tip axis is tangential (cross up×push); +θ tips top with push', () => {
+    const a = tipDropOutwardAxis(1, 0);
+    assert.ok(Math.abs(a.ax) < 1e-9);
+    assert.ok(Math.abs(a.ay) < 1e-9);
+    assert.ok(Math.abs(a.az + 1) < 1e-9);
+    // Hinge at outer edge; center inward+up → after +90° center is outward of hinge.
+    const r = rotateOffsetAroundAxis(-0.1, 0.16, 0, a.ax, a.ay, a.az, Math.PI / 2);
+    assert.ok(r.x > 0, `expected outward x, got ${r.x}`);
+    assert.ok(r.y > 0);
+  });
+
+  it('tipDropHingePoint sits on bottom outer edge; inward chips soft-clamp to lip', () => {
+    // Outer face already past the lip → hinge stays on the piece edge.
+    const edge = tipDropHingePoint({
+      centerX: 0.28,
+      centerY: 0.5,
+      centerZ: 0,
+      dirX: 1,
+      dirZ: 0,
+      bottomY: 0.34,
+      halfX: 0.1,
+      halfZ: 0.1,
+      stumpLipRadius: 0.34,
+    });
+    assert.ok(Math.abs(edge.hingeX - (0.28 + 0.1)) < 1e-9);
+    assert.ok(Math.abs(edge.hingeY - 0.34) < 1e-9);
+
+    const inward = tipDropHingePoint({
+      centerX: 0.05,
+      centerY: 0.5,
+      centerZ: 0,
+      dirX: 1,
+      dirZ: 0,
+      bottomY: 0.34,
+      halfX: 0.06,
+      halfZ: 0.06,
+      stumpLipRadius: 0.34,
+    });
+    assert.ok(Math.abs(inward.hingeX - 0.34) < 1e-9);
+    assert.ok(Math.abs(inward.hingeZ) < 1e-9);
   });
 
   it('normalizePushXZ falls back when degenerate', () => {
@@ -400,6 +495,7 @@ describe('tipDropRestPose / sampleTipDropPose', () => {
     assert.ok(TIP_DROP_ANGLE_DEG >= 60 && TIP_DROP_ANGLE_DEG <= 95);
     assert.ok(TIP_DROP_REST_RADIAL >= 0.55 && TIP_DROP_REST_RADIAL <= 0.85);
     assert.ok(TIP_DROP_SCATTER_RADIAL > TIP_DROP_REST_RADIAL);
+    assert.equal(TIP_DROP_ARC_HEIGHT, 0);
   });
 });
 

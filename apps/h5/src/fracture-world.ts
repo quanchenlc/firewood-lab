@@ -21,6 +21,8 @@ import {
   sampleTipDropPose,
   settlePositionY,
   thicknessInchesAlong,
+  tipDropHingePoint,
+  tipDropOutwardAxis,
   tipDropRestPose,
   TIP_DROP_ANGLE_DEG,
   TIP_DROP_ANGLE_JIT_DEG,
@@ -78,8 +80,8 @@ export interface BounceAnim {
 }
 
 /**
- * Scripted firewood tip-drop — short tip/slide onto nearby yard ground
- * (reference feel), not a cannon-es impulse arc. Optional soft physics after.
+ * Scripted firewood tip-drop — stump-lip hinge tip onto nearby yard ground
+ * (Option B), not a center-of-mass fling. Optional soft physics after.
  */
 export interface TipDropAnim {
   pushX: number;
@@ -92,8 +94,13 @@ export interface TipDropAnim {
   toX: number;
   toY: number;
   toZ: number;
+  /** Stump-top outer bottom edge (hinge) in world space. */
+  hingeX: number;
+  hingeY: number;
+  hingeZ: number;
   tipRad: number;
   yawRad: number;
+  /** Kept for compat; Option B is 0 (no mid-arc lift). */
   arcHeight: number;
   baseQuat: THREE.Quaternion;
 }
@@ -258,9 +265,11 @@ export function createFractureWorld(
   sliceOpts.textureScale.set(1, 1);
   /** World Y of the chopping-block top — measured from the visual stump mesh. */
   let stumpSupportY = opts?.stumpSupportY ?? 0.34;
+  /** Visual stump top radius — tip-drop hinge soft-clamps toward this lip. */
+  let stumpLipRadius = opts?.stumpRadius ?? 0.34;
 
   /**
-   * Firewood exit feel — scripted tip/slide onto nearby yard ground
+   * Firewood exit feel — Option B stump-lip hinge tip onto nearby yard ground
    * (reference screen.toys/firewood), not a box-impulse “gamey” toss.
    * Constants live in @firewood/game-core (TIP_DROP_*).
    */
@@ -286,6 +295,8 @@ export function createFractureWorld(
     // cannon-es Body AABB refresh
     stump.aabbNeedsUpdate = true;
     stumpSupportY = topY;
+    // Tip-drop hinge uses the visual top radius (collider is padded ≥0.35).
+    stumpLipRadius = Math.max(0.28, next.radius);
   }
 
   fitStumpCollider({
@@ -1128,11 +1139,18 @@ export function createFractureWorld(
       toY: t.toY,
       toZ: t.toZ,
       tipRad: t.tipRad,
+      hingeX: t.hingeX,
+      hingeY: t.hingeY,
+      hingeZ: t.hingeZ,
+      dirX: t.pushX,
+      dirZ: t.pushZ,
       arcHeight: t.arcHeight,
     });
 
-    _tiltAxis.set(-t.pushZ, 0, t.pushX);
-    if (_tiltAxis.lengthSq() < 1e-8) _tiltAxis.set(1, 0, 0);
+    // Outward tip: axis = cross(up, push) so +θ tips the top with the push.
+    const axis = tipDropOutwardAxis(t.pushX, t.pushZ);
+    _tiltAxis.set(axis.ax, axis.ay, axis.az);
+    if (_tiltAxis.lengthSq() < 1e-8) _tiltAxis.set(0, 0, -1);
     else _tiltAxis.normalize();
     _tiltQ.setFromAxisAngle(_tiltAxis, sample.tipRad);
     _yawQ.setFromAxisAngle(up, t.yawRad * sample.ease);
@@ -1494,7 +1512,7 @@ export function createFractureWorld(
   }
 
   /**
-   * Scripted tip/slide onto nearby yard ground (post-split + option-A + scatter).
+   * Scripted stump-lip hinge tip onto nearby yard ground (post-split + option-A + scatter).
    * Continuous from the current stump pose — no radial teleport clear.
    */
   function beginFirewoodTipDrop(
@@ -1540,6 +1558,22 @@ export function createFractureWorld(
     const now = performance.now();
     const durationMs = TIP_DROP_DURATION_MS + Math.random() * TIP_DROP_DURATION_JIT_MS;
 
+    f.mesh.updateMatrixWorld(true);
+    _settleBox.setFromObject(f.mesh);
+    const halfX = Math.max(0.02, (_settleBox.max.x - _settleBox.min.x) * 0.5);
+    const halfZ = Math.max(0.02, (_settleBox.max.z - _settleBox.min.z) * 0.5);
+    const hinge = tipDropHingePoint({
+      centerX: f.body.position.x,
+      centerY: f.body.position.y,
+      centerZ: f.body.position.z,
+      dirX: rest.ox,
+      dirZ: rest.oz,
+      bottomY: _settleBox.min.y,
+      halfX,
+      halfZ,
+      stumpLipRadius,
+    });
+
     f.tipDrop = {
       pushX: rest.ox,
       pushZ: rest.oz,
@@ -1551,6 +1585,9 @@ export function createFractureWorld(
       toX: rest.toX,
       toY: rest.toY,
       toZ: rest.toZ,
+      hingeX: hinge.hingeX,
+      hingeY: hinge.hingeY,
+      hingeZ: hinge.hingeZ,
       tipRad: (tipDeg * Math.PI) / 180,
       yawRad,
       arcHeight: TIP_DROP_ARC_HEIGHT,
