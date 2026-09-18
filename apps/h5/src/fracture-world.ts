@@ -46,12 +46,16 @@ import {
   type FracturePlan,
 } from '@firewood/game-core';
 import {
+  applyBarkEdgeCaseU,
+  barkEdgeCutUv,
+  classifyBarkEdgeCase,
   classifyFaceNormal,
+  cutFaceCoverageRatio,
+  cutTriAreaInPlane,
+  estimateChordCover,
   hasReclassifiedInnerSlot,
   shouldSealCutFace,
-  barkEdgeCutUv,
-  cutTriAreaInPlane,
-  cutFaceCoverageRatio,
+  type BarkEdgeCase,
 } from './cut-face';
 import { setShadowFlags } from './shadows';
 
@@ -653,6 +657,46 @@ export function createFractureWorld(
       }
     }
 
+    // Bark-rim vert keys (ref `M` set): exterior side tris that are not caps.
+    // Shared positions with the cut face mark true geometric bark edges.
+    const barkRimKeys = new Set<string>();
+    const keyScale = 1e4;
+    const vertKey = (vi: number): string => {
+      const x = Math.round(pos.getX(vi) * keyScale);
+      const y = Math.round(pos.getY(vi) * keyScale);
+      const z = Math.round(pos.getZ(vi) * keyScale);
+      return `${x},${y},${z}`;
+    };
+    const tmpN = new THREE.Vector3();
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    const ab = new THREE.Vector3();
+    const ac = new THREE.Vector3();
+    for (const g of geo.groups) {
+      if (g.materialIndex === 1) continue; // skip cut/inner
+      const end = g.start + g.count;
+      for (let i = g.start; i + 2 < end; i += 3) {
+        const i0 = index.getX(i);
+        const i1 = index.getX(i + 1);
+        const i2 = index.getX(i + 2);
+        a.fromBufferAttribute(pos, i0);
+        b.fromBufferAttribute(pos, i1);
+        c.fromBufferAttribute(pos, i2);
+        ab.subVectors(b, a);
+        ac.subVectors(c, a);
+        tmpN.crossVectors(ab, ac).normalize();
+        if (Math.abs(tmpN.y) > 0.95) continue; // endgrain caps
+        barkRimKeys.add(vertKey(i0));
+        barkRimKeys.add(vertKey(i1));
+        barkRimKeys.add(vertKey(i2));
+      }
+    }
+
+    /** CASE A/B/C chosen for this cleave — also drives cutCap seal UVs. */
+    let barkCase: BarkEdgeCase = 'A';
+    let chordCover = 1;
+
     if (cutVerts.size >= 3) {
       let uMin = Infinity;
       let uMax = -Infinity;
@@ -668,7 +712,30 @@ export function createFractureWorld(
         vMin = Math.min(vMin, v);
         vMax = Math.max(vMax, v);
       }
-      // CASE1: bark-edge atlas UV — U across chord (A|B|C), V bottom→top.
+      const midU = (uMin + uMax) * 0.5;
+      let hasLeftBark = false;
+      let hasRightBark = false;
+      for (const vi of cutVerts) {
+        if (!barkRimKeys.has(vertKey(vi))) continue;
+        tmp.fromBufferAttribute(pos, vi);
+        if (tmp.dot(tangent) <= midU) hasLeftBark = true;
+        else hasRightBark = true;
+      }
+      barkCase = classifyBarkEdgeCase(hasLeftBark, hasRightBark);
+
+      // Ref `le`: face chord vs estimated full diameter chord.
+      const faceChord = Math.max(1e-6, uMax - uMin);
+      mesh.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(mesh);
+      const size = box.getSize(new THREE.Vector3());
+      // Diameter proxy from piece AABB (half-log ≈ full chord; wedge < diameter).
+      const fullChordGuess = Math.max(
+        faceChord,
+        Math.hypot(size.x, size.z) * (barkCase === 'A' ? 0.95 : 1.35),
+      );
+      chordCover = estimateChordCover(faceChord, fullChordGuess);
+
+      // CASE1: bark-edge atlas UV with A/B/C window; V bottom→top.
       // CASE2: planeD filter above already skipped older cut verts so their UVs stay.
       for (const vi of cutVerts) {
         tmp.fromBufferAttribute(pos, vi);
@@ -680,7 +747,11 @@ export function createFractureWorld(
           vMin,
           vMax,
         );
-        uvAttr.setXY(vi, mapped.u, mapped.v);
+        uvAttr.setXY(
+          vi,
+          applyBarkEdgeCaseU(mapped.u, barkCase, chordCover),
+          mapped.v,
+        );
       }
       uvAttr.needsUpdate = true;
     }
@@ -695,9 +766,6 @@ export function createFractureWorld(
         Math.abs(localN.x) >= Math.abs(localN.z) ? size.z : size.x;
       const expected = Math.max(0.12, spanU) * Math.max(0.15, size.y);
       let area = 0;
-      const a = new THREE.Vector3();
-      const b = new THREE.Vector3();
-      const c = new THREE.Vector3();
       const end = pinataCut.start + pinataCut.count;
       for (let i = pinataCut.start; i + 2 < end; i += 3) {
         const i0 = index.getX(i);
@@ -737,12 +805,12 @@ export function createFractureWorld(
       const width = Math.max(0.12, spanU * 1.04);
       const height = Math.max(0.15, size.y * 1.02);
       const capGeo = new THREE.PlaneGeometry(width, height, 1, 1);
-      // Bark-edge atlas UVs on the seal (U across chord, V along height).
+      // Same CASE A/B/C atlas window as pinata fill (PlaneGeometry U is already 0→1).
       const sealUv = capGeo.attributes.uv as THREE.BufferAttribute;
       for (let i = 0; i < sealUv.count; i++) {
         const u0 = sealUv.getX(i);
         const v0 = sealUv.getY(i);
-        sealUv.setXY(i, u0, v0);
+        sealUv.setXY(i, applyBarkEdgeCaseU(u0, barkCase, chordCover), v0);
       }
       sealUv.needsUpdate = true;
       const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), localN);

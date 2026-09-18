@@ -23,8 +23,9 @@ ASSETS = ROOT / "apps/h5/public/assets"
 FACE = ASSETS / "facegrain"
 BARK = ASSETS / "bark/toona"
 
-# ~12% bark strip each side — thin rim like a fresh split face (readable at game scale).
-BARK_FRAC = 0.12
+# ~3% bark strip each side — matches screen.toys insidegrain *layout* (~2–4%),
+# not their pixels. Wider strips (e.g. 12%) read as thick dark columns on cut faces.
+BARK_FRAC = 0.03
 SIZE = 1024
 
 
