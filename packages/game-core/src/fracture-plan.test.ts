@@ -23,10 +23,19 @@ import {
   RING_PILE_MAX_STACK_H,
   RING_PILE_RADIAL_JIT,
   TIP_DROP_ANGLE_DEG,
+  TIP_DROP_ANGLE_JIT_DEG,
+  TIP_DROP_ANGLE_MIN_DEG,
+  TIP_DROP_ANGLE_MAX_DEG,
   TIP_DROP_ARC_HEIGHT,
   TIP_DROP_DURATION_MS,
+  TIP_DROP_DURATION_JIT_MS,
   TIP_DROP_REST_RADIAL,
   TIP_DROP_REST_RADIAL_JIT,
+  TIP_DROP_REST_TANGENTIAL_JIT,
+  TIP_DROP_HINGE_TANGENTIAL_JIT,
+  TIP_DROP_PUSH_AZIMUTH_JIT_DEG,
+  TIP_DROP_ROLL_JIT_DEG,
+  TIP_DROP_YAW_JIT_DEG,
   TIP_DROP_SCATTER_RADIAL,
   azimuthNudgeVelocity,
   horizontalAspectFromSize,
@@ -43,6 +52,8 @@ import {
   pickRingPileNextSlot,
   rotateOffsetAroundAxis,
   sampleTipDropPose,
+  sampleTipDropAngleDeg,
+  jitterPushAzimuthOutward,
   settlePositionY,
   shouldTossOnTooThin,
   thicknessInchesAlong,
@@ -344,6 +355,55 @@ describe('tipDropRestPose / sampleTipDropPose', () => {
     assert.ok(rest.toY >= 0.04);
   });
 
+  it('Package M: rest tangential offset sits perpendicular to push', () => {
+    const rest = tipDropRestPose({
+      fromX: 0.12,
+      fromZ: 0,
+      dirX: 1,
+      dirZ: 0,
+      restHalfHeight: 0.06,
+      restRadial: TIP_DROP_REST_RADIAL,
+      restRadialJit: 0,
+      rnd: 0,
+      restTangential: 0.06,
+    });
+    assert.ok(Math.abs(rest.toZ + 0.06) < 1e-9 || Math.abs(rest.toZ - 0.06) < 1e-9 || Math.abs(rest.toZ) > 0.05);
+    // push=+X → tangent=(0,0,-1) for +tang? We use (oz, -ox)= (0,-1) for +tang on Z.
+    // to = ox*R + oz*tang, oz*R - ox*tang → (R, -tang) for push +X.
+    assert.ok(Math.abs(rest.toZ - -0.06) < 1e-9);
+    assert.ok(rest.toX >= TIP_DROP_REST_RADIAL - 1e-6);
+  });
+
+  it('Package M: hinge tangential nudges hinge sideways', () => {
+    const h = tipDropHingePoint({
+      centerX: 0.28,
+      centerY: 0.5,
+      centerZ: 0,
+      dirX: 1,
+      dirZ: 0,
+      bottomY: 0.34,
+      halfX: 0.1,
+      halfZ: 0.1,
+      hingeTangential: 0.04,
+    });
+    assert.ok(Math.abs(h.hingeZ - -0.04) < 1e-9);
+  });
+
+  it('sampleTipDropAngleDeg stays in [70,90] with Package M jitter', () => {
+    for (const rnd of [0, 0.5, 0.999]) {
+      const a = sampleTipDropAngleDeg(rnd);
+      assert.ok(a >= TIP_DROP_ANGLE_MIN_DEG && a <= TIP_DROP_ANGLE_MAX_DEG);
+    }
+    assert.equal(sampleTipDropAngleDeg(0.5), TIP_DROP_ANGLE_DEG);
+  });
+
+  it('jitterPushAzimuthOutward keeps outward hemisphere (dot>0)', () => {
+    for (let i = 0; i < 20; i++) {
+      const j = jitterPushAzimuthOutward(1, 0, TIP_DROP_PUSH_AZIMUTH_JIT_DEG, i / 20);
+      assert.ok(j.ox * 1 + j.oz * 0 > 0, `got (${j.ox},${j.oz})`);
+    }
+  });
+
   it('Option B: hinge tip is continuous, outward, and has no mid-arc lift', () => {
     assert.equal(TIP_DROP_ARC_HEIGHT, 0);
 
@@ -490,10 +550,18 @@ describe('tipDropRestPose / sampleTipDropPose', () => {
     assert.ok(Math.abs(n.oz) < 1e-9);
   });
 
-  it('tip-drop duration/angle constants stay in a natural short-settle band', () => {
+  it('tip-drop Package M constants stay in a natural short-settle band', () => {
     assert.ok(TIP_DROP_DURATION_MS >= 280 && TIP_DROP_DURATION_MS <= 420);
-    assert.ok(TIP_DROP_ANGLE_DEG >= 60 && TIP_DROP_ANGLE_DEG <= 95);
+    assert.ok(TIP_DROP_DURATION_JIT_MS >= 150 && TIP_DROP_DURATION_JIT_MS <= 220);
+    assert.ok(TIP_DROP_ANGLE_DEG >= 70 && TIP_DROP_ANGLE_DEG <= 90);
+    assert.equal(TIP_DROP_ANGLE_JIT_DEG, 10);
+    assert.equal(TIP_DROP_YAW_JIT_DEG, 22);
+    assert.equal(TIP_DROP_ROLL_JIT_DEG, 10);
     assert.ok(TIP_DROP_REST_RADIAL >= 0.55 && TIP_DROP_REST_RADIAL <= 0.85);
+    assert.ok(Math.abs(TIP_DROP_REST_RADIAL_JIT - 0.24) < 1e-9);
+    assert.ok(Math.abs(TIP_DROP_REST_TANGENTIAL_JIT - 0.06) < 1e-9);
+    assert.ok(Math.abs(TIP_DROP_HINGE_TANGENTIAL_JIT - 0.04) < 1e-9);
+    assert.equal(TIP_DROP_PUSH_AZIMUTH_JIT_DEG, 12);
     assert.ok(TIP_DROP_SCATTER_RADIAL > TIP_DROP_REST_RADIAL);
     assert.equal(TIP_DROP_ARC_HEIGHT, 0);
   });

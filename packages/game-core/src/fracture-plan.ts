@@ -64,16 +64,25 @@ export const BOUNCE_TILT_DEG = 2;
 /**
  * Scripted firewood tip-drop (logic feel of screen.toys chips leaving the stump).
  * Prefer a short tip/slide onto nearby yard ground over cannon-es impulse arcs.
+ *
+ * Package M (Medium randomness) — keep Option B bottom-hinge outward tip +
+ * ARC_HEIGHT=0 + AABB settle; widen yaw/tip/roll/duration/rest/hinge/push jit.
  */
 /** Tip-over duration (ms) — longer than stump bounce so the tip reads clearly. */
-export const TIP_DROP_DURATION_MS = 340;
-/** Extra random duration jitter (ms). */
-export const TIP_DROP_DURATION_JIT_MS = 90;
+export const TIP_DROP_DURATION_MS = 330;
+/** Extra random duration jitter (ms). Package M ≈180. */
+export const TIP_DROP_DURATION_JIT_MS = 180;
 /** Peak tip angle (degrees) — fall onto a side, not a full tumble. */
-export const TIP_DROP_ANGLE_DEG = 78;
-export const TIP_DROP_ANGLE_JIT_DEG = 14;
-/** Tiny yaw while tipping (±degrees). */
-export const TIP_DROP_YAW_JIT_DEG = 8;
+export const TIP_DROP_ANGLE_DEG = 80;
+/** Symmetric tip jitter (±deg); final angle clamped to [70, 90]. */
+export const TIP_DROP_ANGLE_JIT_DEG = 10;
+/** Hard clamp band for tip angle after jitter. */
+export const TIP_DROP_ANGLE_MIN_DEG = 70;
+export const TIP_DROP_ANGLE_MAX_DEG = 90;
+/** Yaw while tipping (±degrees). Package M ≈22. */
+export const TIP_DROP_YAW_JIT_DEG = 22;
+/** Roll about push axis (±degrees), eased with tip. Package M ≈10. */
+export const TIP_DROP_ROLL_JIT_DEG = 10;
 /**
  * Mid-arc lift (metres). Option B tip-drop is a pure stump-lip hinge — keep 0
  * so chips lean over the edge instead of a center-of-mass fling with lift.
@@ -85,7 +94,14 @@ export const TIP_DROP_ARC_HEIGHT = 0;
  * and far enough that a tipped AABB does not re-intersect the cylinder.
  */
 export const TIP_DROP_REST_RADIAL = 0.66;
-export const TIP_DROP_REST_RADIAL_JIT = 0.14;
+/** Package M radial jitter ≈0.24. */
+export const TIP_DROP_REST_RADIAL_JIT = 0.24;
+/** Tangential rest offset (±metres) perpendicular to push. Package M ≈0.06. */
+export const TIP_DROP_REST_TANGENTIAL_JIT = 0.06;
+/** Tangential hinge offset (±metres). Package M ≈0.04. */
+export const TIP_DROP_HINGE_TANGENTIAL_JIT = 0.04;
+/** Push azimuth jitter (±degrees); forced outward (dot with base push > 0). */
+export const TIP_DROP_PUSH_AZIMUTH_JIT_DEG = 12;
 /** Round-end scatter rests a bit farther out than single-chip tip-drop. */
 export const TIP_DROP_SCATTER_RADIAL = 0.82;
 export const TIP_DROP_SCATTER_RADIAL_JIT = 0.2;
@@ -901,6 +917,7 @@ export function normalizePushXZ(
 /**
  * Ground rest pose for a tip-dropped firewood chip beside the stump.
  * Continuous from the current stump pose — no radial teleport “pop”.
+ * Package M: optional tangential offset perpendicular to push.
  */
 export function tipDropRestPose(input: {
   fromX: number;
@@ -913,6 +930,8 @@ export function tipDropRestPose(input: {
   restRadialJit?: number;
   /** Unit random in [0,1) for radial jitter (injectable for tests). */
   rnd?: number;
+  /** Tangential rest offset (metres); + = left of push looking outward. */
+  restTangential?: number;
   groundPad?: number;
 }): { toX: number; toY: number; toZ: number; ox: number; oz: number; restRadial: number } {
   const { ox, oz } = normalizePushXZ(input.dirX, input.dirZ);
@@ -925,14 +944,61 @@ export function tipDropRestPose(input: {
   const pad = input.groundPad ?? TIP_DROP_GROUND_PAD;
   // Mid-anim estimate only — final rest is AABB-settled after tip quaternion.
   const toY = Math.max(0.04, input.restHalfHeight + pad);
+  // Tangent = cross(up, push) = (oz, 0, -ox) — same as tip axis.
+  const tang = input.restTangential ?? 0;
   return {
-    toX: ox * targetR,
+    toX: ox * targetR + oz * tang,
     toY,
-    toZ: oz * targetR,
+    toZ: oz * targetR - ox * tang,
     ox,
     oz,
     restRadial: targetR,
   };
+}
+
+/**
+ * Sample tip angle with Package M symmetric jitter, clamped to [min,max].
+ */
+export function sampleTipDropAngleDeg(
+  rnd = Math.random(),
+  base = TIP_DROP_ANGLE_DEG,
+  jit = TIP_DROP_ANGLE_JIT_DEG,
+  minDeg = TIP_DROP_ANGLE_MIN_DEG,
+  maxDeg = TIP_DROP_ANGLE_MAX_DEG,
+): number {
+  const signed = (rnd * 2 - 1) * jit;
+  return Math.min(maxDeg, Math.max(minDeg, base + signed));
+}
+
+/**
+ * Jitter push azimuth by ±maxDeg, then force the result to stay outward
+ * (dot with the original push > 0). Retries a few times; falls back to base.
+ */
+export function jitterPushAzimuthOutward(
+  dirX: number,
+  dirZ: number,
+  maxDeg = TIP_DROP_PUSH_AZIMUTH_JIT_DEG,
+  rnd = Math.random(),
+): { ox: number; oz: number } {
+  const base = normalizePushXZ(dirX, dirZ);
+  const maxRad = (Math.abs(maxDeg) * Math.PI) / 180;
+  // Map rnd∈[0,1) → signed angle in [-max, +max].
+  let best = base;
+  for (let i = 0; i < 4; i++) {
+    const t = i === 0 ? rnd : (rnd + i * 0.27) % 1;
+    const ang = (t * 2 - 1) * maxRad;
+    const c = Math.cos(ang);
+    const s = Math.sin(ang);
+    const ox = base.ox * c - base.oz * s;
+    const oz = base.ox * s + base.oz * c;
+    const len = Math.hypot(ox, oz) || 1;
+    const cand = { ox: ox / len, oz: oz / len };
+    if (cand.ox * base.ox + cand.oz * base.oz > 0) {
+      best = cand;
+      break;
+    }
+  }
+  return best;
 }
 
 /**
@@ -984,6 +1050,8 @@ export function tipDropHingePoint(input: {
   halfZ: number;
   /** Stump top radius — hinge nudged toward lip when piece is inward. */
   stumpLipRadius?: number;
+  /** Tangential hinge offset (metres); + = left of push looking outward. */
+  hingeTangential?: number;
 }): { hingeX: number; hingeY: number; hingeZ: number; ox: number; oz: number } {
   const { ox, oz } = normalizePushXZ(input.dirX, input.dirZ);
   const extent = aabbExtentAlongXZ(ox, oz, input.halfX, input.halfZ);
@@ -997,6 +1065,11 @@ export function tipDropHingePoint(input: {
       hingeX = ox * lipR;
       hingeZ = oz * lipR;
     }
+  }
+  const tang = input.hingeTangential ?? 0;
+  if (tang !== 0) {
+    hingeX += oz * tang;
+    hingeZ -= ox * tang;
   }
   // Contact plane ≈ stump top / piece bottom — never above the mesh center.
   const hingeY = Math.min(input.bottomY, input.centerY - 0.01);

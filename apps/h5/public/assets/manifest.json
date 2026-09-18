@@ -18,7 +18,11 @@
     "ash_veneer_sidegrain": {
       "diff": "facegrain/sidegrain_diff.jpg",
       "nor": "facegrain/sidegrain_nor.jpg"
+    },
+    "barkedge_cutface": {
+      "diff": "facegrain/barkedge_diff.jpg",
+      "nor": "facegrain/barkedge_nor.jpg"
     }
   },
-  "generatedAt": "2026-09-17T03:32:00.000Z"
+  "generatedAt": "2026-09-18T07:45:00.000Z"
 }

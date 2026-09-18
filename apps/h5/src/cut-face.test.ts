@@ -1,13 +1,16 @@
 /**
- * Unit tests for cut-face classification + aspect-correct UV helpers.
+ * Unit tests for cut-face classification + bark-edge UV helpers.
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   aspectCorrectUv,
+  barkEdgeCutUv,
+  BARK_EDGE_U_FRAC,
   classifyExteriorNormal,
   classifyFaceNormal,
   cutFaceCoverageRatio,
+  cutTriAreaInPlane,
   hasReclassifiedInnerSlot,
   projectionSpan,
   shouldSealCutFace,
@@ -84,6 +87,25 @@ describe('aspectCorrectUv', () => {
   });
 });
 
+describe('barkEdgeCutUv (CASE1)', () => {
+  it('maps chord U and height V independently to [0,1] for A/B/C atlas', () => {
+    // Tall face: U still spans full atlas (bark L/R at chord ends).
+    const bl = barkEdgeCutUv(0, 0, 0, 0.4, 0, 1.2);
+    const tr = barkEdgeCutUv(0.4, 1.2, 0, 0.4, 0, 1.2);
+    const mid = barkEdgeCutUv(0.2, 0.6, 0, 0.4, 0, 1.2);
+    assert.equal(bl.u, 0);
+    assert.equal(bl.v, 0);
+    assert.equal(tr.u, 1);
+    assert.equal(tr.v, 1);
+    assert.ok(Math.abs(mid.u - 0.5) < 1e-9);
+    assert.ok(Math.abs(mid.v - 0.5) < 1e-9);
+  });
+
+  it('atlas bark-edge fraction stays thin (~12%)', () => {
+    assert.ok(BARK_EDGE_U_FRAC > 0.08 && BARK_EDGE_U_FRAC < 0.18);
+  });
+});
+
 describe('hasReclassifiedInnerSlot', () => {
   const bark = { id: 'bark' };
   const end = { id: 'end' };
@@ -104,12 +126,17 @@ describe('hasReclassifiedInnerSlot', () => {
 });
 
 describe('shouldSealCutFace', () => {
-  it('always seals — old cutTriCount<8 gate missed holed faces with 8+ tris', () => {
-    // Regression: pinata left ~17% coverage with exactly 8 cut tris; <8 skipped seal.
+  it('seals sparse fills; skips only when dense + very high coverage', () => {
     assert.equal(shouldSealCutFace(0), true);
     assert.equal(shouldSealCutFace(7), true);
-    assert.equal(shouldSealCutFace(8), true);
-    assert.equal(shouldSealCutFace(40), true);
+    assert.equal(shouldSealCutFace(15), true);
+    // Dense without coverage → still seal until heuristic threshold.
+    assert.equal(shouldSealCutFace(30), true);
+    assert.equal(shouldSealCutFace(60), false);
+    // Explicit coverage wins.
+    assert.equal(shouldSealCutFace(60, 0.5), true);
+    assert.equal(shouldSealCutFace(20, 0.97), false);
+    assert.equal(shouldSealCutFace(20, 0.9), true);
   });
 });
 
@@ -117,5 +144,19 @@ describe('cutFaceCoverageRatio', () => {
   it('flags sparse fill as a hole', () => {
     assert.ok(cutFaceCoverageRatio(0.02, 0.12) < 0.85);
     assert.ok(cutFaceCoverageRatio(0.12, 0.12) >= 0.99);
+  });
+});
+
+describe('cutTriAreaInPlane', () => {
+  it('returns half base×height for axis-aligned right triangle', () => {
+    // Triangle (0,0,0)-(2,0,0)-(0,0,2) in XZ, tangent=+X, bitangent=+Z.
+    const a = cutTriAreaInPlane(
+      0, 0, 0,
+      2, 0, 0,
+      0, 0, 2,
+      1, 0, 0,
+      0, 0, 1,
+    );
+    assert.ok(Math.abs(a - 2) < 1e-9);
   });
 });

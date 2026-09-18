@@ -11,7 +11,7 @@ import {
   STUMP_TOP_RADIUS,
 } from './log-dimensions';
 
-/** Mild albedo tint so shared ash_veneer side-grain reads per-species (keep pale). */
+/** Mild albedo tint so shared bark-edge cut atlas reads per-species (keep pale). */
 const SIDEGRAIN_TINT: Record<string, number> = {
   pinus: 0xfff6e8,
   'quercus-serrata': 0xf8e8d4,
@@ -54,7 +54,7 @@ export interface SpeciesMaterials {
   endgrain: THREE.MeshStandardMaterial;
   /** Outer materials for cylinder groups: [side, top, bottom] */
   outer: THREE.MeshStandardMaterial[];
-  /** Longitudinal face-grain for vertical chop cut faces (not end-grain rings). */
+  /** Bark-edge cut atlas for vertical chop faces (grain mid + bark L/R). */
   inner: THREE.MeshStandardMaterial;
   dispose(): void;
 }
@@ -101,7 +101,7 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
     endMap.wrapS = endMap.wrapT = THREE.ClampToEdgeWrapping;
     endMap.repeat.set(1, 1);
   }
-  // Side-grain: aspect-correct cut-plane UVs; clamp avoids stripe tiling.
+  // Side-grain / bark-edge atlas: CASE1 UVs span [0,1]²; clamp avoids tiling.
   if (faceMap) {
     faceMap.wrapS = faceMap.wrapT = THREE.ClampToEdgeWrapping;
     faceMap.repeat.set(1, 1);
@@ -126,7 +126,7 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
     metalness: 0,
   });
 
-  // Cut faces: photographic longitudinal side-grain (not procedural sin stripes).
+  // Cut faces: bark-edge atlas (thin bark L/R + longitudinal grain mid).
   const inner = new THREE.MeshStandardMaterial({
     map: faceMap ?? undefined,
     normalMap: faceNor ?? undefined,
