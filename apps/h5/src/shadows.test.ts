@@ -26,7 +26,7 @@ describe('shadowTuneForDevice', () => {
     assert.equal(t.type, THREE.PCFSoftShadowMap);
     assert.ok(t.radius >= 1.5);
     assert.ok(t.camSize >= t.camSize); // sanity
-    assert.ok(t.camSize >= 3.5 && t.camSize <= 6);
+    assert.ok(t.camSize >= 3.5 && t.camSize <= 5);
   });
 
   it('weak map is never larger than desktop', () => {

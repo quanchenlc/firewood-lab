@@ -272,17 +272,18 @@ export function createLogScene(
   /** Current upright round — resampled on each reset / species rebuild. */
   let roundDims: LogRoundDims = sampleLogRound();
 
-  // Bright hemisphere: warm sky + greenish ground bounce.
-  scene.add(new THREE.HemisphereLight(0xfff4e4, 0x7f9a62, weak ? 1.45 : 1.75));
-  const key = new THREE.DirectionalLight(0xffefd4, weak ? 2.15 : 2.65);
+  // Bright outdoor lighting — hemi/fill kept moderate so sun shadows stay readable
+  // on the yard (too much bounce washed contact under stump / chips).
+  scene.add(new THREE.HemisphereLight(0xfff4e4, 0x7f9a62, weak ? 1.15 : 1.32));
+  const key = new THREE.DirectionalLight(0xffefd4, weak ? 2.35 : 2.9);
   key.position.set(3.6, 6.8, 2.6);
   scene.add(key);
   // Real shadowMap (not ContactShadows) — map size / type tuned for mobile H5.
   enableSunShadows(renderer, scene, key, { weakDevice: weak });
-  const fill = new THREE.DirectionalLight(0xc2daf5, weak ? 0.7 : 0.95);
+  const fill = new THREE.DirectionalLight(0xc2daf5, weak ? 0.42 : 0.55);
   fill.position.set(-3.2, 2.8, -2.4);
   scene.add(fill);
-  const rim = new THREE.DirectionalLight(0xeef4ff, 0.4);
+  const rim = new THREE.DirectionalLight(0xeef4ff, 0.28);
   rim.position.set(-1.5, 3.8, 4.5);
   scene.add(rim);
 

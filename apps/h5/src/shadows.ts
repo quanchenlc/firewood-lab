@@ -37,10 +37,11 @@ export function shadowTuneForDevice(weakDevice: boolean): ShadowTune {
     mapSize: 1024,
     radius: 2.2,
     bias: -0.00018,
-    normalBias: 0.025,
+    normalBias: 0.02,
     camNear: 0.4,
     camFar: 18,
-    camSize: 4.2,
+    // Slightly tighter frustum → denser texels / clearer contact near stump.
+    camSize: 3.8,
     type: THREE.PCFSoftShadowMap,
   };
 }
