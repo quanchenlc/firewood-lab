@@ -101,8 +101,8 @@ describe('barkEdgeCutUv (CASE1)', () => {
     assert.ok(Math.abs(mid.v - 0.5) < 1e-9);
   });
 
-  it('atlas bark-edge fraction stays thin (~9%)', () => {
-    assert.ok(BARK_EDGE_U_FRAC > 0.05 && BARK_EDGE_U_FRAC < 0.15);
+  it('atlas bark-edge fraction stays thin (~12%)', () => {
+    assert.ok(BARK_EDGE_U_FRAC > 0.08 && BARK_EDGE_U_FRAC < 0.18);
   });
 });
 

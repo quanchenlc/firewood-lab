@@ -23,8 +23,8 @@ ASSETS = ROOT / "apps/h5/public/assets"
 FACE = ASSETS / "facegrain"
 BARK = ASSETS / "bark/toona"
 
-# ~9% bark strip each side — thin rim like a fresh split face.
-BARK_FRAC = 0.094
+# ~12% bark strip each side — thin rim like a fresh split face (readable at game scale).
+BARK_FRAC = 0.12
 SIZE = 1024
 
 

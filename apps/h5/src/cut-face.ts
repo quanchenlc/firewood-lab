@@ -83,7 +83,7 @@ export function projectionSpan(uSpan: number, vSpan: number): number {
  * Fraction of the bark-edge atlas reserved for each bark rim (A / C).
  * Must match `scripts/barkedge-atlas.py` BARK_FRAC.
  */
-export const BARK_EDGE_U_FRAC = 0.094;
+export const BARK_EDGE_U_FRAC = 0.12;
 
 /**
  * CASE1 cut-face UV (ref-style bark-edge atlas):
