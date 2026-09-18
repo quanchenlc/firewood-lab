@@ -4,13 +4,16 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  applyBarkEdgeCaseU,
   aspectCorrectUv,
   barkEdgeCutUv,
   BARK_EDGE_U_FRAC,
+  classifyBarkEdgeCase,
   classifyExteriorNormal,
   classifyFaceNormal,
   cutFaceCoverageRatio,
   cutTriAreaInPlane,
+  estimateChordCover,
   hasReclassifiedInnerSlot,
   projectionSpan,
   shouldSealCutFace,
@@ -41,8 +44,6 @@ describe('classifyFaceNormal', () => {
   });
 
   it('outer mantle facing away from cleave stays bark (not |n·plane| trap)', () => {
-    // +X half: curved mantle normals span roughly -90°..+90° around +X.
-    // Old |n·plane| heuristic tagged most of these as "inner".
     for (let a = -Math.PI / 2; a <= Math.PI / 2 + 1e-9; a += Math.PI / 16) {
       const nx = Math.cos(a);
       const nz = Math.sin(a);
@@ -55,7 +56,6 @@ describe('classifyFaceNormal', () => {
   });
 
   it('cleave-aligned exterior without cut-group flag is still bark', () => {
-    // Must not infer inner from normals alone — that is the post-#22 bark bug.
     assert.equal(classifyFaceNormal({ x: 1, y: 0, z: 0 }, plane), 'bark');
     assert.equal(classifyFaceNormal({ x: -0.9, y: 0.1, z: 0.1 }, plane), 'bark');
   });
@@ -70,7 +70,6 @@ describe('classifyExteriorNormal', () => {
 
 describe('aspectCorrectUv', () => {
   it('uses uniform span (no independent u/v stretch)', () => {
-    // Face is 2 wide × 1 tall → span=2; height maps to 0.5 not 1.
     const a = aspectCorrectUv(0, 0, 0, 0, projectionSpan(2, 1));
     const b = aspectCorrectUv(2, 1, 0, 0, projectionSpan(2, 1));
     assert.equal(a.u, 0);
@@ -87,9 +86,8 @@ describe('aspectCorrectUv', () => {
   });
 });
 
-describe('barkEdgeCutUv (CASE1)', () => {
-  it('maps chord U and height V independently to [0,1] for A/B/C atlas', () => {
-    // Tall face: U still spans full atlas (bark L/R at chord ends).
+describe('barkEdgeCutUv (CASE1 normalize)', () => {
+  it('maps chord U and height V independently to [0,1]', () => {
     const bl = barkEdgeCutUv(0, 0, 0, 0.4, 0, 1.2);
     const tr = barkEdgeCutUv(0.4, 1.2, 0, 0.4, 0, 1.2);
     const mid = barkEdgeCutUv(0.2, 0.6, 0, 0.4, 0, 1.2);
@@ -101,8 +99,63 @@ describe('barkEdgeCutUv (CASE1)', () => {
     assert.ok(Math.abs(mid.v - 0.5) < 1e-9);
   });
 
-  it('atlas bark-edge fraction stays thin (~12%)', () => {
-    assert.ok(BARK_EDGE_U_FRAC > 0.08 && BARK_EDGE_U_FRAC < 0.18);
+  it('atlas bark-edge fraction stays thin (~2–4%, ref-like)', () => {
+    assert.ok(BARK_EDGE_U_FRAC >= 0.02 && BARK_EDGE_U_FRAC <= 0.05);
+  });
+});
+
+describe('classifyBarkEdgeCase + applyBarkEdgeCaseU', () => {
+  it('A/B/C from left/right bark flags', () => {
+    assert.equal(classifyBarkEdgeCase(true, true), 'A');
+    assert.equal(classifyBarkEdgeCase(true, false), 'B_left');
+    assert.equal(classifyBarkEdgeCase(false, true), 'B_right');
+    assert.equal(classifyBarkEdgeCase(false, false), 'C');
+  });
+
+  it('CASE A: full atlas — center samples grain mid, ends near bark rims', () => {
+    assert.equal(applyBarkEdgeCaseU(0, 'A', 1), 0);
+    assert.equal(applyBarkEdgeCaseU(0.5, 'A', 1), 0.5);
+    assert.equal(applyBarkEdgeCaseU(1, 'A', 1), 1);
+    // Center must NOT land on a bark rim (U≈0 or U≈1).
+    const mid = applyBarkEdgeCaseU(0.5, 'A', 1);
+    assert.ok(mid > BARK_EDGE_U_FRAC && mid < 1 - BARK_EDGE_U_FRAC);
+  });
+
+  it('CASE B_left: pith→bark face samples from left bark into grain', () => {
+    const le = 0.6;
+    assert.ok(Math.abs(applyBarkEdgeCaseU(0, 'B_left', le) - 0) < 1e-9);
+    assert.ok(Math.abs(applyBarkEdgeCaseU(1, 'B_left', le) - le) < 1e-9);
+    // Outer end is grain, not the right-hand bark strip.
+    assert.ok(applyBarkEdgeCaseU(1, 'B_left', le) < 1 - BARK_EDGE_U_FRAC);
+  });
+
+  it('CASE B_right: samples toward right bark', () => {
+    const le = 0.6;
+    assert.ok(Math.abs(applyBarkEdgeCaseU(1, 'B_right', le) - 1) < 1e-9);
+    assert.ok(Math.abs(applyBarkEdgeCaseU(0, 'B_right', le) - (1 - le)) < 1e-9);
+  });
+
+  it('CASE C: interior face stays in grain mid-strip (no bark band)', () => {
+    const le = 0.5;
+    const lo = applyBarkEdgeCaseU(0, 'C', le);
+    const hi = applyBarkEdgeCaseU(1, 'C', le);
+    const mid = applyBarkEdgeCaseU(0.5, 'C', le);
+    assert.ok(lo > BARK_EDGE_U_FRAC);
+    assert.ok(hi < 1 - BARK_EDGE_U_FRAC);
+    assert.ok(Math.abs(mid - 0.5) < 1e-9);
+    // Entire span avoids bark rims.
+    for (let t = 0; t <= 10; t++) {
+      const u = applyBarkEdgeCaseU(t / 10, 'C', le);
+      assert.ok(u >= BARK_EDGE_U_FRAC && u <= 1 - BARK_EDGE_U_FRAC, `u=${u}`);
+    }
+  });
+});
+
+describe('estimateChordCover', () => {
+  it('clamps face/full to [0,1]', () => {
+    assert.equal(estimateChordCover(1, 2), 0.5);
+    assert.equal(estimateChordCover(3, 2), 1);
+    assert.equal(estimateChordCover(0, 2), 0);
   });
 });
 
@@ -112,7 +165,6 @@ describe('hasReclassifiedInnerSlot', () => {
   const inner = { id: 'inner' };
 
   it('fresh cylinder [bark, end, end] is NOT an inner slot', () => {
-    // materialIndex 2 is the bottom endgrain — must not feed pinata interior.
     assert.equal(hasReclassifiedInnerSlot([bark, end, end], inner), false);
   });
 
@@ -130,10 +182,8 @@ describe('shouldSealCutFace', () => {
     assert.equal(shouldSealCutFace(0), true);
     assert.equal(shouldSealCutFace(7), true);
     assert.equal(shouldSealCutFace(15), true);
-    // Dense without coverage → still seal until heuristic threshold.
     assert.equal(shouldSealCutFace(30), true);
     assert.equal(shouldSealCutFace(60), false);
-    // Explicit coverage wins.
     assert.equal(shouldSealCutFace(60, 0.5), true);
     assert.equal(shouldSealCutFace(20, 0.97), false);
     assert.equal(shouldSealCutFace(20, 0.9), true);
@@ -149,7 +199,6 @@ describe('cutFaceCoverageRatio', () => {
 
 describe('cutTriAreaInPlane', () => {
   it('returns half base×height for axis-aligned right triangle', () => {
-    // Triangle (0,0,0)-(2,0,0)-(0,0,2) in XZ, tangent=+X, bitangent=+Z.
     const a = cutTriAreaInPlane(
       0, 0, 0,
       2, 0, 0,

@@ -5,18 +5,23 @@
  * cleave we reclassify triangles into 3 slots like screen.toys/firewood:
  *   0 = bark (side), 1 = endgrain (caps), 2 = inner side-grain (cut faces)
  *
- * CASE1 (new cleave): U across chord → bark-edge atlas A|B|C; V bottom→top
- * along log height. CASE2 (re-split): skip verts not on the current plane so
- * older cut UVs stay intact.
+ * CASE1 (new cleave): U across chord → bark-edge atlas; V bottom→top along
+ * log height. Sub-cases A/B/C (from ref bundled JS) place bark strips only
+ * where the cut meets true bark rim verts:
+ *   A — bark on both chord ends → full atlas U∈[0,1]
+ *   B — bark on one end only → sample atlas from that bark edge inward
+ *   C — no bark rim (interior re-split) → sample grain mid-strip only
+ *
+ * CASE2 (re-split): skip verts not on the current plane so older cut UVs stay.
  *
  * IMPORTANT: do NOT classify exterior mantle as "inner" via |n·cleavePlane|.
- * On each half-log the outer bark normals point *away* from the cut, so
- * |n·plane| ≈ 1 across most of the curved mantle — that heuristic paints bark
- * with the side-grain / wrong slot and destroys the photographic bark look.
  * Cut faces come from pinata's cut group (materialIndex 1); caps use |ny|.
  */
 
 export type FaceKind = 'bark' | 'endgrain' | 'inner';
+
+/** Ref-style CASE1 sub-type for bark-edge atlas sampling. */
+export type BarkEdgeCase = 'A' | 'B_left' | 'B_right' | 'C';
 
 export interface Vec3 {
   x: number;
@@ -82,15 +87,14 @@ export function projectionSpan(uSpan: number, vSpan: number): number {
 /**
  * Fraction of the bark-edge atlas reserved for each bark rim (A / C).
  * Must match `scripts/barkedge-atlas.py` BARK_FRAC.
+ *
+ * Ref `insidegrain.jpg` keeps bark on only ~2–4% of U each side; 12% made
+ * thick dark columns that read as a “bark band” on split faces.
  */
-export const BARK_EDGE_U_FRAC = 0.12;
+export const BARK_EDGE_U_FRAC = 0.03;
 
 /**
- * CASE1 cut-face UV (ref-style bark-edge atlas):
- *   V = bottom → top along log height (bitangent / +Y)
- *   U = across chord, sampling atlas A|B|C (thin bark L/R + grain middle)
- *
- * Independent normalize to [0,1]² so L/R bark strips land on the chord ends.
+ * Normalize chord U / height V independently to [0,1]² (raw face coords).
  */
 export function barkEdgeCutUv(
   u: number,
@@ -109,12 +113,66 @@ export function barkEdgeCutUv(
 }
 
 /**
+ * Which atlas window to use given bark-rim presence on the chord.
+ * Mirrors screen.toys CASE A / B / C (logic only — no their textures).
+ */
+export function classifyBarkEdgeCase(
+  hasLeftBark: boolean,
+  hasRightBark: boolean,
+): BarkEdgeCase {
+  if (hasLeftBark && hasRightBark) return 'A';
+  if (hasLeftBark) return 'B_left';
+  if (hasRightBark) return 'B_right';
+  return 'C';
+}
+
+/**
+ * Map normalized chord U∈[0,1] into the bark-edge atlas.
+ *
+ * @param chordCover `le` in ref — min(1, faceChord / estimatedFullChord).
+ *   <1 when the face is narrower than a diameter (wedge / off-center).
+ */
+export function applyBarkEdgeCaseU(
+  uNorm: number,
+  barkCase: BarkEdgeCase,
+  chordCover = 1,
+): number {
+  const u = Math.max(0, Math.min(1, uNorm));
+  const le = Math.max(0, Math.min(1, chordCover));
+  switch (barkCase) {
+    case 'A':
+      // Full diameter: bark L + grain mid + bark R.
+      return u;
+    case 'B_left':
+      // Bark only on the low-U end → sample [0, le] (left bark → grain).
+      return u * le;
+    case 'B_right':
+      // Bark only on the high-U end → sample [1-le, 1].
+      return 1 - (1 - u) * le;
+    case 'C':
+      // Interior face: grain mid-strip only (skip both bark rims).
+      return (1 - le) / 2 + u * le;
+    default:
+      return u;
+  }
+}
+
+/**
+ * Estimate chord coverage vs a full diameter (ref `le`).
+ * When unknown, prefer 1 (CASE A full span) — thin atlas bark keeps interiors pale.
+ */
+export function estimateChordCover(
+  faceChord: number,
+  fullChordEstimate: number,
+): number {
+  const face = Math.max(0, faceChord);
+  const full = Math.max(1e-6, fullChordEstimate);
+  return Math.min(1, face / full);
+}
+
+/**
  * True when `materials[2]` is the side-grain inner slot from a prior
  * `reclassifyPieceMaterials` pass — not CylinderGeometry's bottom endgrain.
- *
- * Fresh logs use `material = [bark, endgrain, endgrain]` while `innerMat` lives
- * only in userData. Treating materialIndex 2 as "cut" on a fresh cylinder feeds
- * the bottom cap into pinata's interior group and contaminates cut triangulation.
  */
 export function hasReclassifiedInnerSlot(
   materials: unknown,
@@ -129,7 +187,7 @@ export function hasReclassifiedInnerSlot(
  * Whether to synthesize a rectangular cutCap seal over the cleave face.
  *
  * three-pinata's constrained Delaunay fill frequently leaves holes on sparse
- * fills. Prefer sealing so the bark-edge atlas reads on a clean A|B|C plane;
+ * fills. Prefer sealing so the bark-edge atlas reads on a clean plane;
  * only skip when triangulation is both dense and high-coverage (avoids z-fight).
  */
 export function shouldSealCutFace(

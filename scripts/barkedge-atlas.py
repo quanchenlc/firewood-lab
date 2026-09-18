@@ -23,8 +23,9 @@ ASSETS = ROOT / "apps/h5/public/assets"
 FACE = ASSETS / "facegrain"
 BARK = ASSETS / "bark/toona"
 
-# ~12% bark strip each side — thin rim like a fresh split face (readable at game scale).
-BARK_FRAC = 0.12
+# ~3% bark strip each side — matches screen.toys insidegrain *layout* (~2–4%),
+# not their pixels. Wider strips (e.g. 12%) read as thick dark columns on cut faces.
+BARK_FRAC = 0.03
 SIZE = 1024
 
 
@@ -54,7 +55,7 @@ def _grain_panel(grain: Image.Image, width: int, height: int) -> Image.Image:
     g = grain.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
     # Mild soften so the composite doesn't scream "veneer photo".
     g = g.filter(ImageFilter.GaussianBlur(radius=0.4))
-    g = ImageEnhance.Brightness(g).enhance(1.04)
+    g = ImageEnhance.Brightness(g).enhance(1.18)
     return g.resize((width, height), Image.Resampling.LANCZOS)
 
 
