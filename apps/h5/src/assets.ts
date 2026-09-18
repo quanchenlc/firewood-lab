@@ -11,14 +11,14 @@ import {
   STUMP_TOP_RADIUS,
 } from './log-dimensions';
 
-/** Mild albedo tint so shared ash_veneer side-grain reads per-species. */
+/** Mild albedo tint so shared ash_veneer side-grain reads per-species (keep pale). */
 const SIDEGRAIN_TINT: Record<string, number> = {
-  pinus: 0xfff0d8,
-  'quercus-serrata': 0xf0d8b8,
-  cryptomeria: 0xf5e2c4,
-  platanus: 0xf2e4c8,
-  'eucalyptus-globulus': 0xe8dcc0,
-  toona: 0xf0c8a0,
+  pinus: 0xfff6e8,
+  'quercus-serrata': 0xf8e8d4,
+  cryptomeria: 0xfaf0dc,
+  platanus: 0xf7edd8,
+  'eucalyptus-globulus': 0xf0e8d4,
+  toona: 0xf8e0c8,
 };
 
 export type ProgressFn = (ratio: number, label: string) => void;
@@ -130,6 +130,7 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
   const inner = new THREE.MeshStandardMaterial({
     map: faceMap ?? undefined,
     normalMap: faceNor ?? undefined,
+    normalScale: faceNor ? new THREE.Vector2(0.35, 0.35) : undefined,
     color: faceMap ? tint : 0xc4a574,
     roughness: 0.88,
     metalness: 0,

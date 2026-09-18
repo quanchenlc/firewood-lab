@@ -956,6 +956,42 @@ async function boot(): Promise<void> {
       const n = logScene.lastCleaveNormal;
       return n ? { x: n.x, z: n.z } : null;
     },
+    /** Inspect post-split materials / groups (cut-face QA). */
+    materialProbe: () => {
+      const report: Array<{
+        role: string;
+        matCount: number;
+        groups: Array<{ materialIndex: number; count: number }>;
+        maps: Array<{ i: number; map?: string; color?: string }>;
+      }> = [];
+      const visit = (mesh: THREE.Mesh, role: string) => {
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        const geo = mesh.geometry;
+        const groups = (geo?.groups ?? []).map((g) => ({
+          materialIndex: g.materialIndex ?? 0,
+          count: g.count,
+        }));
+        const maps = mats.map((raw, i) => {
+          const m = raw as THREE.MeshStandardMaterial;
+          const mapSrc = m?.map?.image
+            ? ((m.map.image as HTMLImageElement).currentSrc ||
+                (m.map.image as HTMLImageElement).src ||
+                '(image)')
+            : undefined;
+          return {
+            i,
+            map: mapSrc?.split('/').slice(-2).join('/'),
+            color: m?.color ? `#${m.color.getHexString()}` : undefined,
+          };
+        });
+        report.push({ role, matCount: mats.length, groups, maps });
+      };
+      visit(logScene.logMesh, 'log');
+      for (const f of logScene.fracture.fragments) {
+        if (f.mesh.visible) visit(f.mesh, 'fragment');
+      }
+      return report;
+    },
   };
 
   function frame(now: number): void {
