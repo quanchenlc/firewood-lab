@@ -23,6 +23,7 @@ import {
   type LogRoundDims,
   STUMP_BOT_RADIUS,
 } from './log-dimensions';
+import { enableSunShadows, setShadowFlags } from './shadows';
 
 export interface LogScene {
   scene: THREE.Scene;
@@ -209,6 +210,9 @@ function addYardDebris(scene: THREE.Scene, opts: { weak: boolean }): void {
   faceInst.instanceMatrix.needsUpdate = true;
   chipInst.frustumCulled = true;
   faceInst.frustumCulled = true;
+  // Soft contact under yard chips — InstancedMesh shadow is one draw.
+  chipInst.castShadow = true;
+  faceInst.castShadow = true;
   scene.add(chipInst);
   scene.add(faceInst);
 
@@ -232,6 +236,7 @@ function addYardDebris(scene: THREE.Scene, opts: { weak: boolean }): void {
       (yardRand(seed) - 0.5) * 0.5,
     );
     scrap.scale.setScalar(0.75 + yardRand(seed) * 0.7);
+    scrap.castShadow = true;
     scene.add(scrap);
   }
 }
@@ -270,15 +275,18 @@ export function createLogScene(
   /** Current upright round — resampled on each reset / species rebuild. */
   let roundDims: LogRoundDims = sampleLogRound();
 
-  // Bright hemisphere: warm sky + greenish ground bounce.
-  scene.add(new THREE.HemisphereLight(0xfff4e4, 0x7f9a62, weak ? 1.45 : 1.75));
-  const key = new THREE.DirectionalLight(0xffefd4, weak ? 2.15 : 2.65);
+  // Bright outdoor lighting — hemi/fill kept moderate so sun shadows stay readable
+  // on the yard (too much bounce washed contact under stump / chips).
+  scene.add(new THREE.HemisphereLight(0xfff4e4, 0x7f9a62, weak ? 1.15 : 1.32));
+  const key = new THREE.DirectionalLight(0xffefd4, weak ? 2.35 : 2.9);
   key.position.set(3.6, 6.8, 2.6);
   scene.add(key);
-  const fill = new THREE.DirectionalLight(0xc2daf5, weak ? 0.7 : 0.95);
+  // Real shadowMap (not ContactShadows) — map size / type tuned for mobile H5.
+  enableSunShadows(renderer, scene, key, { weakDevice: weak });
+  const fill = new THREE.DirectionalLight(0xc2daf5, weak ? 0.42 : 0.55);
   fill.position.set(-3.2, 2.8, -2.4);
   scene.add(fill);
-  const rim = new THREE.DirectionalLight(0xeef4ff, 0.4);
+  const rim = new THREE.DirectionalLight(0xeef4ff, 0.28);
   rim.position.set(-1.5, 3.8, 4.5);
   scene.add(rim);
 
@@ -319,7 +327,8 @@ export function createLogScene(
   ground.rotation.x = -Math.PI / 2;
   // Align with tip-drop / ring AABB settle + physics Plane (YARD_GROUND_Y = 0).
   ground.position.y = 0;
-  ground.receiveShadow = false;
+  // Contact shadows under stump / log / firewood — was false so pieces looked pasted.
+  ground.receiveShadow = true;
   scene.add(ground);
 
   addYardDebris(scene, { weak });
@@ -435,6 +444,8 @@ export function createLogScene(
     mesh.userData.role = 'log';
     mesh.userData.generation = 0;
     mesh.userData.logDims = { ...roundDims };
+    // Choppable round casts onto stump top + yard ground.
+    setShadowFlags(mesh, { cast: true, receive: true });
     return mesh;
   }
 

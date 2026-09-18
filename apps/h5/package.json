@@ -8,7 +8,7 @@
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --experimental-strip-types --test src/debug-flags.test.ts src/log-dimensions.test.ts src/cut-face.test.ts"
+    "test": "node --experimental-strip-types --test src/debug-flags.test.ts src/log-dimensions.test.ts src/cut-face.test.ts src/shadows.test.ts"
   },
   "dependencies": {
     "@dgreenheck/three-pinata": "^2.0.1",

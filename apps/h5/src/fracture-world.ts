@@ -44,6 +44,7 @@ import {
   classifyFaceNormal,
   projectionSpan,
 } from './cut-face';
+import { setShadowFlags } from './shadows';
 
 /** Scratch box for AABB ground settle (tip-drop + ring pile). */
 const _settleBox = new THREE.Box3();
@@ -712,6 +713,8 @@ export function createFractureWorld(
       cap.position.copy(localPos);
       cap.userData.role = 'cutCap';
       cap.renderOrder = 1;
+      cap.castShadow = true;
+      cap.receiveShadow = true;
       mesh.add(cap);
     }
 
@@ -1158,6 +1161,8 @@ export function createFractureWorld(
     for (let i = 0; i < pieces.length; i++) {
       const fragment = pieces[i]!;
       repairCutFace(fragment, planeNormal, worldImpact);
+      // Firewood chips + stump wedges cast readable contact on ground / block.
+      setShadowFlags(fragment, { cast: true, receive: true });
       scene.add(fragment);
       fragment.updateMatrixWorld(true);
 
