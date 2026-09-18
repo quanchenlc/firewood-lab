@@ -23,6 +23,7 @@ import {
   type LogRoundDims,
   STUMP_BOT_RADIUS,
 } from './log-dimensions';
+import { enableSunShadows, setShadowFlags } from './shadows';
 
 export interface LogScene {
   scene: THREE.Scene;
@@ -206,6 +207,9 @@ function addYardDebris(scene: THREE.Scene, opts: { weak: boolean }): void {
   faceInst.instanceMatrix.needsUpdate = true;
   chipInst.frustumCulled = true;
   faceInst.frustumCulled = true;
+  // Soft contact under yard chips — InstancedMesh shadow is one draw.
+  chipInst.castShadow = true;
+  faceInst.castShadow = true;
   scene.add(chipInst);
   scene.add(faceInst);
 
@@ -229,6 +233,7 @@ function addYardDebris(scene: THREE.Scene, opts: { weak: boolean }): void {
       (yardRand(seed) - 0.5) * 0.5,
     );
     scrap.scale.setScalar(0.75 + yardRand(seed) * 0.7);
+    scrap.castShadow = true;
     scene.add(scrap);
   }
 }
@@ -272,6 +277,8 @@ export function createLogScene(
   const key = new THREE.DirectionalLight(0xffefd4, weak ? 2.15 : 2.65);
   key.position.set(3.6, 6.8, 2.6);
   scene.add(key);
+  // Real shadowMap (not ContactShadows) — map size / type tuned for mobile H5.
+  enableSunShadows(renderer, scene, key, { weakDevice: weak });
   const fill = new THREE.DirectionalLight(0xc2daf5, weak ? 0.7 : 0.95);
   fill.position.set(-3.2, 2.8, -2.4);
   scene.add(fill);
@@ -316,7 +323,8 @@ export function createLogScene(
   ground.rotation.x = -Math.PI / 2;
   // Align with tip-drop / ring AABB settle + physics Plane (YARD_GROUND_Y = 0).
   ground.position.y = 0;
-  ground.receiveShadow = false;
+  // Contact shadows under stump / log / firewood — was false so pieces looked pasted.
+  ground.receiveShadow = true;
   scene.add(ground);
 
   addYardDebris(scene, { weak });
@@ -432,6 +440,8 @@ export function createLogScene(
     mesh.userData.role = 'log';
     mesh.userData.generation = 0;
     mesh.userData.logDims = { ...roundDims };
+    // Choppable round casts onto stump top + yard ground.
+    setShadowFlags(mesh, { cast: true, receive: true });
     return mesh;
   }
 
