@@ -447,6 +447,9 @@ export function createLogScene(
       });
     const mesh = new DestructibleMesh(buildLogGeometry(roundDims), outer[0]!, inner);
     mesh.material = outer;
+    mesh.userData.barkMat = outer[0];
+    mesh.userData.endgrainMat = outer[1] ?? outer[0];
+    mesh.userData.innerMat = inner;
     mesh.position.set(0, logCenterY, 0);
     mesh.userData.role = 'log';
     mesh.userData.generation = 0;

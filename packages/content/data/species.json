@@ -18,7 +18,8 @@
       "barkUrl": "https://polyhaven.com/a/pine_bark",
       "license": "CC0",
       "author": "Dimitrios Savva / Poly Haven",
-      "endgrain": "Procedural rings (Firewood Lab), tinted for species"
+      "endgrain": "Procedural rings (Firewood Lab), tinted for species",
+      "facegrain": "Poly Haven ash_veneer (CC0), rotated longitudinal side-grain"
     }
   },
   {
@@ -40,7 +41,8 @@
       "barkUrl": "https://polyhaven.com/a/jolcham_oak_bark_01",
       "license": "CC0",
       "author": "Charlotte Baglioni / Poly Haven",
-      "endgrain": "Procedural rings (Firewood Lab), tinted for species"
+      "endgrain": "Procedural rings (Firewood Lab), tinted for species",
+      "facegrain": "Poly Haven ash_veneer (CC0), rotated longitudinal side-grain"
     }
   },
   {
@@ -62,7 +64,8 @@
       "barkUrl": "https://polyhaven.com/a/japanese_cedar_bark",
       "license": "CC0",
       "author": "Charlotte Baglioni / Poly Haven",
-      "endgrain": "Procedural rings (Firewood Lab), tinted for species"
+      "endgrain": "Procedural rings (Firewood Lab), tinted for species",
+      "facegrain": "Poly Haven ash_veneer (CC0), rotated longitudinal side-grain"
     }
   },
   {
@@ -84,7 +87,8 @@
       "barkUrl": "https://polyhaven.com/a/bark_platanus",
       "license": "CC0",
       "author": "Poly Haven",
-      "endgrain": "Procedural rings (Firewood Lab), tinted for species"
+      "endgrain": "Procedural rings (Firewood Lab), tinted for species",
+      "facegrain": "Poly Haven ash_veneer (CC0), rotated longitudinal side-grain"
     }
   },
   {
@@ -106,7 +110,8 @@
       "barkUrl": "https://polyhaven.com/a/bark_bluegum",
       "license": "CC0",
       "author": "Dimitrios Savva / Poly Haven",
-      "endgrain": "Procedural rings (Firewood Lab), tinted for species"
+      "endgrain": "Procedural rings (Firewood Lab), tinted for species",
+      "facegrain": "Poly Haven ash_veneer (CC0), rotated longitudinal side-grain"
     }
   },
   {
@@ -128,7 +133,8 @@
       "barkUrl": "https://polyhaven.com/a/chinese_cedar_bark",
       "license": "CC0",
       "author": "Poly Haven",
-      "endgrain": "Procedural rings (Firewood Lab), tinted for species"
+      "endgrain": "Procedural rings (Firewood Lab), tinted for species",
+      "facegrain": "Poly Haven ash_veneer (CC0), rotated longitudinal side-grain"
     }
   }
 ]
