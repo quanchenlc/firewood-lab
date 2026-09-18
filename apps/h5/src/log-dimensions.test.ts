@@ -80,7 +80,7 @@ describe('log-dimensions (firewood-scale round)', () => {
     assert.ok(STUMP_HEIGHT >= 0.28 && STUMP_HEIGHT <= 0.4);
   });
 
-  it('sampleLogRound matches tuned inch ranges (5–8.5 r, 13–17 h)', () => {
+  it('sampleLogRound matches tuned inch ranges (5.5–9 r, 13.5–17.5 h)', () => {
     const rand = lcg(0xc0ffee41);
     for (let i = 0; i < 64; i++) {
       const d = sampleLogRound(rand);

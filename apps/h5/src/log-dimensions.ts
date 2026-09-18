@@ -18,21 +18,22 @@
  * (thresholds unchanged). Mid defaults keep framing close to the prior fixed round.
  *
  * Visual retune vs stockier stump (STUMP_* ≈ 0.34/0.40/0.34): inch ranges sit a
- * modest ~8% above the pure reference so the round reads larger on the block,
- * while max bot radius (+ bark) still seats inside the stump top with margin.
+ * modest ~12–15% above the pure reference so the round reads larger on the block
+ * (stump outline noise also fattens the visual top), while max bot radius (+ bark)
+ * still seats inside the stump top with margin.
  */
 
 export const INCH = 0.0254;
 
 /**
  * Radius range (inches). Reference was `(9+rand*7)/2` → 4.5…8;
- * bumped slightly so the round fills the stump top better.
+ * bumped so the round fills the stump top better after stockier STUMP_* retune.
  */
-export const LOG_RADIUS_IN_MIN = 5;
-export const LOG_RADIUS_IN_MAX = 8.5;
+export const LOG_RADIUS_IN_MIN = 5.5;
+export const LOG_RADIUS_IN_MAX = 9;
 /** Height range (inches). Reference was `12+rand*4` → 12…16; modest bump. */
-export const LOG_HEIGHT_IN_MIN = 13;
-export const LOG_HEIGHT_IN_MAX = 17;
+export const LOG_HEIGHT_IN_MIN = 13.5;
+export const LOG_HEIGHT_IN_MAX = 17.5;
 
 /** Bark irregularity (reference `qu` / `Ju`), in inches. */
 export const BARK_AMP_IN = 0.4;
@@ -64,7 +65,7 @@ export const STUMP_HEIGHT = 0.34;
 /** Orbit look-at Y ≈ stump top + half default log height. */
 export const CAM_LOOK_AT_Y = STUMP_HEIGHT + LOG_HEIGHT * 0.5;
 /** Orbit distance — slightly out so the modestly larger round still frames cleanly. */
-export const CAM_RADIUS = 3.05;
+export const CAM_RADIUS = 3.1;
 
 export interface LogRoundDims {
   /** Metres. */
