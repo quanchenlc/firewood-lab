@@ -755,12 +755,37 @@ async function boot(): Promise<void> {
           splittable: f.splittable,
           tipDrop: !!f.tipDrop,
           bounce: !!f.bounce,
+          recycle: !!f.recycle,
           x: +x.toFixed(3),
           y: +y.toFixed(3),
           z: +z.toFixed(3),
           radial: +Math.hypot(x, z).toFixed(3),
         };
       }),
+    /**
+     * Debug: local grain axis (Y) world-up component for firewood chips.
+     * Side-lying ring rest → |grainUp| small; stump-vertical → near 1.
+     */
+    firewoodGrainUp: () =>
+      logScene.fracture.fragments
+        .filter((f) => f.mesh.visible && !f.onStump)
+        .map((f) => {
+          const q = f.mesh.quaternion;
+          // Rotate local +Y by mesh quat → world grain direction (Y component).
+          const grainY = 1 - 2 * (q.x * q.x + q.z * q.z);
+          return {
+            grainUp: +Math.abs(grainY).toFixed(3),
+            grainY: +grainY.toFixed(3),
+            radial: +Math.hypot(f.body.position.x, f.body.position.z).toFixed(3),
+            y: +f.body.position.y.toFixed(3),
+            recycling: !!f.recycle,
+          };
+        }),
+    /** Directly pull live fragments into the ring (skip tip-drop wait). */
+    recycleNow: () => {
+      logScene.fracture.recycleToRing({ groundY: 0 });
+      return true;
+    },
     /** Debug: per-piece local volume (in³) + aspect for classification tuning. */
     pieceStats: () => {
       const INCH = 0.0254;
