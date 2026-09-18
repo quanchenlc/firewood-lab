@@ -58,6 +58,14 @@ scripts/pull-assets.mjs  # 从 Poly Haven API 拉取 1K 贴图与 GLTF
 
 详见 `apps/h5/public/assets/ATTRIBUTION.md`。
 
+### 音频（本次）
+
+- **户外环境 BGM**（循环、音量约 0.4）：BigSoundBank *Forest*（Joseph Sardin，CC0）
+- **劈柴 SFX**：BigSoundBank *Ax on Wood* 截取多段命中（CC0）；过轻 nick / 过薄 nudge 用 OpenGameArt rubberduck 木击包（CC0）
+- **未使用** screen.toys / shapiro500 的任何音频文件；仅对照其触发时机（落斧瞬间 / 劈开时）与大致混音
+
+左下角 **音 / 静** 可静音；偏好写入 `localStorage`（`firewood.h5.muted`）。首次点击/触摸会解锁 `AudioContext` 并启动 BGM（符合浏览器自动播放策略）。
+
 | 用途 | 来源 | 许可 |
 |------|------|------|
 | 6 种树皮 PBR（diff/nor/rough 1K） | Poly Haven bark packs | CC0 |
