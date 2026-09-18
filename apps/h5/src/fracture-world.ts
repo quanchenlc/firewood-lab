@@ -499,12 +499,69 @@ export function createFractureWorld(
   }
 
   /**
-   * After three-pinata slice (2 materials): aspect-correct cut UVs + reclassify
-   * tris into bark / endgrain / inner side-grain so caps keep rings.
+   * three-pinata only preserves outer vs cut when `geometry.groups.length === 2`.
+   * After our 3-material reclassify (bark/endgrain/inner), collapse so the next
+   * slice keeps prior cut faces in the inner bucket instead of dumping them
+   * into "outer" (which would lose side-grain on re-chop).
    */
-  function repairCutFace(mesh: DestructibleMesh, planeNormal: THREE.Vector3): void {
+  function preparePinataGroups(mesh: DestructibleMesh): void {
+    const geo = mesh.geometry;
+    const index = geo.index;
+    if (!index) return;
+    const mats = resolvePieceMaterials(mesh);
+
+    const exterior: number[] = [];
+    const interior: number[] = [];
+    const groups = geo.groups;
+
+    if (groups.length === 0) {
+      for (let i = 0; i < index.count; i++) exterior.push(index.getX(i));
+    } else if (groups.length === 2) {
+      for (const g of groups) {
+        const dest = (g.materialIndex ?? 0) === 1 ? interior : exterior;
+        const end = g.start + g.count;
+        for (let i = g.start; i < end; i++) dest.push(index.getX(i));
+      }
+    } else {
+      // 3-slot layout from reclassify: 0=bark, 1=endgrain, 2=inner
+      // Also handles CylinderGeometry [side, top, bottom] before first chop.
+      for (const g of groups) {
+        const mi = g.materialIndex ?? 0;
+        const dest = mi === 2 ? interior : exterior;
+        const end = g.start + g.count;
+        for (let i = g.start; i < end; i++) dest.push(index.getX(i));
+      }
+    }
+
+    const merged = new Uint32Array(exterior.length + interior.length);
+    merged.set(exterior, 0);
+    merged.set(interior, exterior.length);
+    geo.setIndex(new THREE.BufferAttribute(merged, 1));
+    geo.clearGroups();
+    geo.addGroup(0, exterior.length, 0);
+    if (interior.length > 0) geo.addGroup(exterior.length, interior.length, 1);
+
+    // Pinata fragment materials are [outside, inside].
+    mesh.material = [mats.bark, mats.inner];
+    mesh.userData.barkMat = mats.bark;
+    mesh.userData.endgrainMat = mats.endgrain;
+    mesh.userData.innerMat = mats.inner;
+  }
+
+  /**
+   * After three-pinata slice (2 materials): aspect-correct cut UVs + reclassify
+   * tris into bark / endgrain / inner side-grain so caps keep rings and the
+   * outer mantle keeps bark (cut faces come from pinata group 1 only).
+   */
+  function repairCutFace(
+    mesh: DestructibleMesh,
+    planeNormal: THREE.Vector3,
+    planePoint?: THREE.Vector3,
+  ): void {
     const geo = mesh.geometry;
     if (!geo?.attributes.position) return;
+
+    mesh.updateMatrixWorld(true);
 
     const pos = geo.attributes.position as THREE.BufferAttribute;
     const uvAttr = geo.attributes.uv as THREE.BufferAttribute | undefined;
@@ -521,19 +578,45 @@ export function createFractureWorld(
     n.y = 0;
     if (n.lengthSq() < 1e-8) n.set(1, 0, 0);
     else n.normalize();
-    const tangent = new THREE.Vector3(-n.z, 0, n.x);
+    // Local-space cleave normal (slice runs in mesh local frame).
+    const localN = n
+      .clone()
+      .transformDirection(new THREE.Matrix4().copy(mesh.matrixWorld).invert())
+      .normalize();
+    localN.y = 0;
+    if (localN.lengthSq() < 1e-8) localN.set(1, 0, 0);
+    else localN.normalize();
+    const tangent = new THREE.Vector3(-localN.z, 0, localN.x);
     const bitangent = up.clone();
 
-    // Only reproject vertices from pinata's NEW cut group (materialIndex 1).
-    // Already-cut faces from prior chops stay in other groups and keep UVs.
+    // Plane offset in local space — used to reproject only *this* cut's verts
+    // when group 1 also holds older inner faces from prior chops.
+    let planeD: number | null = null;
+    if (planePoint) {
+      const localPt = mesh.worldToLocal(planePoint.clone());
+      planeD = localN.dot(localPt);
+    }
+
+    // Only reproject vertices from pinata's cut group (materialIndex 1) that
+    // lie on the current cleave plane (skip older inner faces on re-chop).
     const pinataCut = geo.groups.find((g) => g.materialIndex === 1);
     const cutVerts = new Set<number>();
     let cutTriCount = 0;
     if (pinataCut && pinataCut.count > 0) {
       cutTriCount = Math.floor(pinataCut.count / 3);
       const end = pinataCut.start + pinataCut.count;
+      const tmp = new THREE.Vector3();
       for (let i = pinataCut.start; i < end; i++) {
-        cutVerts.add(index.getX(i));
+        const vi = index.getX(i);
+        if (planeD !== null) {
+          tmp.fromBufferAttribute(pos, vi);
+          if (Math.abs(tmp.dot(localN) - planeD) > 0.025) continue;
+        }
+        cutVerts.add(vi);
+      }
+      // Fallback: if plane filter culled everything (e.g. matrix quirk), keep full cut group.
+      if (cutVerts.size < 3) {
+        for (let i = pinataCut.start; i < end; i++) cutVerts.add(index.getX(i));
       }
     }
 
@@ -581,7 +664,7 @@ export function createFractureWorld(
         sealUv.setXY(i, (u0 * width) / sealSpan, (v0 * height) / sealSpan);
       }
       sealUv.needsUpdate = true;
-      const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+      const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), localN);
       const capMat =
         mats.inner && 'clone' in mats.inner
           ? (mats.inner.clone() as THREE.MeshStandardMaterial)
@@ -604,10 +687,10 @@ export function createFractureWorld(
         localPos.copy(avg);
       } else {
         const center = box.getCenter(new THREE.Vector3());
-        const extent = Math.abs(n.x) * size.x * 0.5 + Math.abs(n.z) * size.z * 0.5;
+        const extent = Math.abs(localN.x) * size.x * 0.5 + Math.abs(localN.z) * size.z * 0.5;
         const toOrigin = new THREE.Vector3(-center.x, 0, -center.z);
-        const sideSign = Math.sign(toOrigin.dot(n)) || 1;
-        const worldCapPos = center.clone().addScaledVector(n, sideSign * extent * 0.92);
+        const sideSign = Math.sign(toOrigin.dot(localN)) || 1;
+        const worldCapPos = center.clone().addScaledVector(localN, sideSign * extent * 0.92);
         mesh.worldToLocal(worldCapPos);
         localPos.copy(worldCapPos);
       }
@@ -654,7 +737,7 @@ export function createFractureWorld(
 
   /**
    * Rebuild index groups: 0=bark, 1=endgrain caps (|ny|), 2=inner cut faces.
-   * Keeps tops showing growth rings after bipartition.
+   * Inner faces come from pinata's cut group — never from |n·plane| on exterior.
    */
   function reclassifyPieceMaterials(
     mesh: DestructibleMesh,
@@ -665,6 +748,15 @@ export function createFractureWorld(
     const pos = geo.attributes.position as THREE.BufferAttribute;
     const index = geo.index;
     if (!index) return;
+
+    // Snapshot which index slots belong to pinata cut/inner (materialIndex 1)
+    // before we rebuild groups.
+    const cutIndexSlots = new Set<number>();
+    for (const g of geo.groups) {
+      if ((g.materialIndex ?? 0) !== 1) continue;
+      const end = g.start + g.count;
+      for (let i = g.start; i < end; i++) cutIndexSlots.add(i);
+    }
 
     const barkIdx: number[] = [];
     const endIdx: number[] = [];
@@ -681,6 +773,7 @@ export function createFractureWorld(
       const i0 = index.getX(i);
       const i1 = index.getX(i + 1);
       const i2 = index.getX(i + 2);
+      const isCutGroup = cutIndexSlots.has(i);
       a.fromBufferAttribute(pos, i0);
       b.fromBufferAttribute(pos, i1);
       c.fromBufferAttribute(pos, i2);
@@ -688,11 +781,12 @@ export function createFractureWorld(
       ac.subVectors(c, a);
       fn.crossVectors(ab, ac);
       if (fn.lengthSq() < 1e-12) {
-        barkIdx.push(i0, i1, i2);
+        if (isCutGroup) innerIdx.push(i0, i1, i2);
+        else barkIdx.push(i0, i1, i2);
         continue;
       }
       fn.normalize();
-      const kind = classifyFaceNormal({ x: fn.x, y: fn.y, z: fn.z }, pn);
+      const kind = classifyFaceNormal({ x: fn.x, y: fn.y, z: fn.z }, pn, { isCutGroup });
       if (kind === 'endgrain') endIdx.push(i0, i1, i2);
       else if (kind === 'inner') innerIdx.push(i0, i1, i2);
       else barkIdx.push(i0, i1, i2);
@@ -744,6 +838,7 @@ export function createFractureWorld(
     plan: FracturePlan,
     keepParallel: boolean,
   ): DestructibleMesh[] {
+    preparePinataGroups(root);
     const primary = root.sliceWorld(planeNormal, worldImpact, sliceOpts);
     inheritSpeciesMats(root, primary);
     if (!plan.messy || plan.fragmentCount <= 2 || primary.length === 0) {
@@ -777,6 +872,7 @@ export function createFractureWorld(
 
       try {
         piece.updateMatrixWorld(true);
+        preparePinataGroups(piece);
         const sub = piece.sliceWorld(n2, origin, sliceOpts);
         if (sub.length >= 2) {
           inheritSpeciesMats(piece, sub);
@@ -1051,7 +1147,7 @@ export function createFractureWorld(
 
     for (let i = 0; i < pieces.length; i++) {
       const fragment = pieces[i]!;
-      repairCutFace(fragment, planeNormal);
+      repairCutFace(fragment, planeNormal, worldImpact);
       scene.add(fragment);
       fragment.updateMatrixWorld(true);
 
