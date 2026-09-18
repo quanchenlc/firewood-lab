@@ -1066,6 +1066,20 @@ async function boot(): Promise<void> {
       }
       return ok;
     },
+    /**
+     * Debug: stretch in-flight tip-drop duration (for mid-frame screenshots).
+     * Call immediately after tossAim / firewood tip starts.
+     */
+    stretchTipDrops: (factor = 6) => {
+      const f = Math.max(1, factor);
+      let n = 0;
+      for (const frag of logScene.fracture.fragments) {
+        if (!frag.tipDrop) continue;
+        frag.tipDrop.durationMs *= f;
+        n += 1;
+      }
+      return n;
+    },
     /** Option A: perp thickness + firewood gate for current aim. */
     aimTooThinDecision: () => {
       if (!aimTarget) return null;
