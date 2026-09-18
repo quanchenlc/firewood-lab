@@ -849,8 +849,8 @@ export function createFractureWorld(
     }
 
     // Option 1: if pinata fill is sparse, seal with a contour polygon from real
-    // bark-edge ∩ plane verts (shared indices → flush, no black seam). Dense
-    // high-coverage fills skip the extra seal.
+    // bark-edge ∩ plane verts (duplicated at same positions → flush, no black
+    // seam). Dense high-coverage fills skip the extra seal.
     if (shouldSealCutFace(cutTriCount, coverageRatio)) {
       appendContourCutSeal(mesh, {
         localN,
@@ -866,8 +866,7 @@ export function createFractureWorld(
       });
     }
 
-    // Light deterministic rough-cut micro-displacement along the cut normal
-    // for verts on this cleave (shared fill + seal). Tiny amp — no gaps.
+    // Light deterministic rough-cut micro-displacement on interior fill verts.
     applyRoughCutDisplacement(mesh, localN, planeD, cutVerts);
 
     // Reclassify every triangle → bark / endgrain / inner (3 materials).
