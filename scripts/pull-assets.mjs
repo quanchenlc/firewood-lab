@@ -10,8 +10,8 @@ import { dirname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { createCanvas } from './endgrain-canvas.mjs';
-import { writeFaceGrain } from './facegrain-canvas.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const OUT = join(ROOT, 'apps/h5/public/assets');
@@ -41,6 +41,16 @@ const GROUND = [{ id: 'forest_ground_04', dir: 'ground/forest_ground_04' }];
 const SKIES = [
   { id: 'kloofendal_48d_partly_cloudy_puresky', dir: 'sky/kloofendal_48d_partly_cloudy_puresky', file: 'sky_1k.hdr' },
 ];
+
+/**
+ * Photographic longitudinal side-grain for cut faces (not procedural sin stripes).
+ * ash_veneer grain runs horizontal in source — transpose so V aligns with log height.
+ */
+const SIDEGRAIN = {
+  id: 'ash_veneer',
+  diffName: 'sidegrain_diff.jpg',
+  norName: 'sidegrain_nor.jpg',
+};
 
 const ENDGRAIN_TINTS = {
   pinus: [210, 180, 120],
@@ -148,11 +158,58 @@ function writeEndgrain() {
   }
 }
 
-function writeFacegrains() {
-  for (const [species, rgb] of Object.entries(ENDGRAIN_TINTS)) {
-    const dest = join(OUT, 'facegrain', `${species}.png`);
-    writeFaceGrain(dest, rgb);
-    console.log('  facegrain', dest);
+/**
+ * Download ash_veneer + rotate 90° so grain runs along V (log height).
+ * Overwrites facegrain/sidegrain_{diff,nor}.jpg. Retires procedural sin canvas.
+ */
+async function pullSidegrain() {
+  console.log('sidegrain', SIDEGRAIN.id);
+  const files = await api(`/files/${SIDEGRAIN.id}`);
+  const diff = pickJpg(files.Diffuse, '1k');
+  const nor = pickJpg(files.nor_gl, '1k');
+  if (!diff) throw new Error(`Missing ${SIDEGRAIN.id} Diffuse`);
+  const faceDir = join(OUT, 'facegrain');
+  mkdirSync(faceDir, { recursive: true });
+  const rawDiff = join(faceDir, '_raw_ash_veneer_diff.jpg');
+  const rawNor = join(faceDir, '_raw_ash_veneer_nor.jpg');
+  // Force re-download when regenerating oriented maps.
+  for (const p of [rawDiff, rawNor, join(faceDir, SIDEGRAIN.diffName), join(faceDir, SIDEGRAIN.norName)]) {
+    try {
+      const { unlinkSync } = await import('node:fs');
+      if (existsSync(p)) unlinkSync(p);
+    } catch {
+      /* ignore */
+    }
+  }
+  await download(diff.url, rawDiff);
+  if (nor) await download(nor.url, rawNor);
+
+  const outDiff = join(faceDir, SIDEGRAIN.diffName);
+  const outNor = join(faceDir, SIDEGRAIN.norName);
+  // transpose=2 = 90° CCW — horizontal veneer grain → vertical (V = height).
+  const rot = (src, dest) => {
+    const r = spawnSync('ffmpeg', ['-y', '-i', src, '-vf', 'transpose=2', dest], {
+      encoding: 'utf8',
+    });
+    if (r.status !== 0) {
+      throw new Error(`ffmpeg rotate failed: ${r.stderr || r.stdout}`);
+    }
+    console.log('  sidegrain', dest);
+  };
+  rot(rawDiff, outDiff);
+  if (existsSync(rawNor)) rot(rawNor, outNor);
+
+  // Drop temps + legacy procedural species facegrain PNGs.
+  const { readdirSync, unlinkSync } = await import('node:fs');
+  for (const name of ['_raw_ash_veneer_diff.jpg', '_raw_ash_veneer_nor.jpg']) {
+    const p = join(faceDir, name);
+    if (existsSync(p)) unlinkSync(p);
+  }
+  for (const name of readdirSync(faceDir)) {
+    if (name.endsWith('.png')) {
+      unlinkSync(join(faceDir, name));
+      console.log('  removed procedural', name);
+    }
   }
 }
 
@@ -162,7 +219,7 @@ async function main() {
   await pullGround();
   await pullSkies();
   writeEndgrain();
-  writeFacegrains();
+  await pullSidegrain();
   const modelIndex = {};
   for (const m of MODELS) {
     const file = await pullModel(m.id, m.dir);
@@ -176,6 +233,10 @@ async function main() {
     kloofendal_48d_partly_cloudy_puresky: {
       hdr: 'sky/kloofendal_48d_partly_cloudy_puresky/sky_1k.hdr',
       jpg: 'sky/kloofendal_48d_partly_cloudy_puresky/sky_2k.jpg',
+    },
+    ash_veneer_sidegrain: {
+      diff: 'facegrain/sidegrain_diff.jpg',
+      nor: 'facegrain/sidegrain_nor.jpg',
     },
   };
   writeFileSync(

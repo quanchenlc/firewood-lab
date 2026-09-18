@@ -3,12 +3,23 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import type { Axe, Species } from '@firewood/game-core';
 import { assetUrl } from './asset-url';
+import { SIDEGRAIN_DIFF, SIDEGRAIN_NOR } from './cut-face';
 import {
   applyStumpOutlineIrregularity,
   STUMP_BOT_RADIUS,
   STUMP_HEIGHT,
   STUMP_TOP_RADIUS,
 } from './log-dimensions';
+
+/** Mild albedo tint so shared ash_veneer side-grain reads per-species. */
+const SIDEGRAIN_TINT: Record<string, number> = {
+  pinus: 0xfff0d8,
+  'quercus-serrata': 0xf0d8b8,
+  cryptomeria: 0xf5e2c4,
+  platanus: 0xf2e4c8,
+  'eucalyptus-globulus': 0xe8dcc0,
+  toona: 0xf0c8a0,
+};
 
 export type ProgressFn = (ratio: number, label: string) => void;
 
@@ -48,17 +59,14 @@ export interface SpeciesMaterials {
   dispose(): void;
 }
 
-function facegrainUrlFromEndgrain(endgrainUrl: string): string {
-  return endgrainUrl.replace(/\/endgrain\//, '/facegrain/');
-}
-
 export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMaterials> {
   const maps = species.maps;
+  const tint = SIDEGRAIN_TINT[species.id] ?? 0xf0e0d0;
   if (!maps?.barkDiff) {
     const bark = new THREE.MeshStandardMaterial({ color: 0x8b5a2b, roughness: 0.9 });
     const end = new THREE.MeshStandardMaterial({ color: 0xd4b896, roughness: 0.92 });
     const face = new THREE.MeshStandardMaterial({
-      color: 0xc4a574,
+      color: tint,
       roughness: 0.88,
       side: THREE.DoubleSide,
     });
@@ -75,15 +83,13 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
     };
   }
 
-  const faceUrl = maps.endgrain ? facegrainUrlFromEndgrain(maps.endgrain) : null;
-  const [diff, nor, rough, endMap, faceMap] = await Promise.all([
+  const [diff, nor, rough, endMap, faceMap, faceNor] = await Promise.all([
     loadTexture(maps.barkDiff, THREE.SRGBColorSpace),
     maps.barkNor ? loadTexture(maps.barkNor) : Promise.resolve(null),
     maps.barkRough ? loadTexture(maps.barkRough) : Promise.resolve(null),
     maps.endgrain ? loadTexture(maps.endgrain, THREE.SRGBColorSpace) : Promise.resolve(null),
-    faceUrl
-      ? loadTexture(faceUrl, THREE.SRGBColorSpace).catch(() => null)
-      : Promise.resolve(null),
+    loadTexture(SIDEGRAIN_DIFF, THREE.SRGBColorSpace).catch(() => null),
+    loadTexture(SIDEGRAIN_NOR).catch(() => null),
   ]);
 
   diff.repeat.set(1.2, 1);
@@ -95,9 +101,14 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
     endMap.wrapS = endMap.wrapT = THREE.ClampToEdgeWrapping;
     endMap.repeat.set(1, 1);
   }
+  // Side-grain: aspect-correct cut-plane UVs; clamp avoids stripe tiling.
   if (faceMap) {
     faceMap.wrapS = faceMap.wrapT = THREE.ClampToEdgeWrapping;
-    faceMap.repeat.set(0.85, 1.15);
+    faceMap.repeat.set(1, 1);
+  }
+  if (faceNor) {
+    faceNor.wrapS = faceNor.wrapT = THREE.ClampToEdgeWrapping;
+    faceNor.repeat.set(1, 1);
   }
 
   const bark = new THREE.MeshStandardMaterial({
@@ -115,10 +126,11 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
     metalness: 0,
   });
 
-  // Cut faces: longitudinal grain + DoubleSide (not end-grain rings).
+  // Cut faces: photographic longitudinal side-grain (not procedural sin stripes).
   const inner = new THREE.MeshStandardMaterial({
     map: faceMap ?? undefined,
-    color: faceMap ? 0xf0e0d0 : 0xc4a574,
+    normalMap: faceNor ?? undefined,
+    color: faceMap ? tint : 0xc4a574,
     roughness: 0.88,
     metalness: 0,
     side: THREE.DoubleSide,
@@ -138,6 +150,7 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
       rough?.dispose();
       endMap?.dispose();
       faceMap?.dispose();
+      faceNor?.dispose();
       bark.dispose();
       endgrain.dispose();
       inner.dispose();
@@ -368,7 +381,8 @@ export async function preloadContentAssets(
           first.maps.barkNor,
           first.maps.barkRough,
           first.maps.endgrain,
-          first.maps.endgrain?.replace(/\/endgrain\//, '/facegrain/'),
+          SIDEGRAIN_DIFF,
+          SIDEGRAIN_NOR,
         ]
           .filter(Boolean)
           .map(

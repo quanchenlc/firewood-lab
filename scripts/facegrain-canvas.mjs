@@ -1,6 +1,7 @@
 /**
- * Longitudinal face-grain PNG for vertical chop faces (not end-grain rings).
- * Vertical lines + soft noise — reads as split wood, not a bullseye target.
+ * @deprecated Procedural sin-stripe facegrain — retired.
+ * Cut faces now use photographic Poly Haven ash_veneer via `pull-assets.mjs`
+ * → `facegrain/sidegrain_{diff,nor}.jpg`. Kept only so old docs/links don't 404 the module.
  */
 import { deflateSync } from 'node:zlib';
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -33,8 +34,9 @@ function chunk(type, data) {
   return Buffer.concat([len, body, crc]);
 }
 
-/** @param {string} dest @param {[number,number,number]} rgb */
+/** @deprecated Prefer Poly Haven sidegrain maps from pull-assets.mjs */
 export function writeFaceGrain(dest, rgb) {
+  console.warn('[facegrain-canvas] deprecated — use assets:pull sidegrain (ash_veneer)');
   const size = 512;
   const [br, bg, bb] = rgb;
   const raw = Buffer.alloc(size * size * 3 + size);
@@ -42,7 +44,6 @@ export function writeFaceGrain(dest, rgb) {
   for (let y = 0; y < size; y++) {
     raw[o++] = 0;
     for (let x = 0; x < size; x++) {
-      // Soft vertical grain bands (along Y in UV → along log height when mapped)
       const band =
         Math.sin(x * 0.085) * 0.1 +
         Math.sin(x * 0.23 + 1.7) * 0.06 +
