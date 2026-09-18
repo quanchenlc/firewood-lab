@@ -220,6 +220,14 @@ async function main() {
   await pullSkies();
   writeEndgrain();
   await pullSidegrain();
+  // Bark-edge cut atlas (A|B|C) — CC0 composite; never screen.toys insidegrain.
+  const atlas = spawnSync('python3', [join(ROOT, 'scripts/barkedge-atlas.py')], {
+    encoding: 'utf8',
+  });
+  if (atlas.status !== 0) {
+    throw new Error(`barkedge-atlas failed: ${atlas.stderr || atlas.stdout}`);
+  }
+  console.log(atlas.stdout.trim());
   const modelIndex = {};
   for (const m of MODELS) {
     const file = await pullModel(m.id, m.dir);
@@ -237,6 +245,10 @@ async function main() {
     ash_veneer_sidegrain: {
       diff: 'facegrain/sidegrain_diff.jpg',
       nor: 'facegrain/sidegrain_nor.jpg',
+    },
+    barkedge_cutface: {
+      diff: 'facegrain/barkedge_diff.jpg',
+      nor: 'facegrain/barkedge_nor.jpg',
     },
   };
   writeFileSync(

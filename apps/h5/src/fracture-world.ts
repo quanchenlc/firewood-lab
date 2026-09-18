@@ -24,15 +24,19 @@ import {
   tipDropHingePoint,
   tipDropOutwardAxis,
   tipDropRestPose,
-  TIP_DROP_ANGLE_DEG,
-  TIP_DROP_ANGLE_JIT_DEG,
+  sampleTipDropAngleDeg,
+  jitterPushAzimuthOutward,
   TIP_DROP_ARC_HEIGHT,
   TIP_DROP_DURATION_JIT_MS,
   TIP_DROP_DURATION_MS,
   TIP_DROP_GROUND_PAD,
+  TIP_DROP_HINGE_TANGENTIAL_JIT,
   TIP_DROP_POST_SETTLE_MS,
+  TIP_DROP_PUSH_AZIMUTH_JIT_DEG,
   TIP_DROP_REST_RADIAL,
   TIP_DROP_REST_RADIAL_JIT,
+  TIP_DROP_REST_TANGENTIAL_JIT,
+  TIP_DROP_ROLL_JIT_DEG,
   TIP_DROP_SCATTER_RADIAL,
   TIP_DROP_SCATTER_RADIAL_JIT,
   TIP_DROP_YAW_JIT_DEG,
@@ -42,11 +46,12 @@ import {
   type FracturePlan,
 } from '@firewood/game-core';
 import {
-  aspectCorrectUv,
   classifyFaceNormal,
   hasReclassifiedInnerSlot,
-  projectionSpan,
   shouldSealCutFace,
+  barkEdgeCutUv,
+  cutTriAreaInPlane,
+  cutFaceCoverageRatio,
 } from './cut-face';
 import { setShadowFlags } from './shadows';
 
@@ -100,6 +105,8 @@ export interface TipDropAnim {
   hingeZ: number;
   tipRad: number;
   yawRad: number;
+  /** Package M: roll about push axis (eased with tip). */
+  rollRad: number;
   /** Kept for compat; Option B is 0 (no mid-arc lift). */
   arcHeight: number;
   baseQuat: THREE.Quaternion;
@@ -307,10 +314,12 @@ export function createFractureWorld(
 
   const _tiltQ = new THREE.Quaternion();
   const _yawQ = new THREE.Quaternion();
+  const _rollQ = new THREE.Quaternion();
   const _outQ = new THREE.Quaternion();
   const _fromQ = new THREE.Quaternion();
   const _toQ = new THREE.Quaternion();
   const _tiltAxis = new THREE.Vector3();
+  const _rollAxis = new THREE.Vector3();
   const _basis = new THREE.Matrix4();
   const _axisX = new THREE.Vector3();
   const _axisY = new THREE.Vector3();
@@ -659,21 +668,65 @@ export function createFractureWorld(
         vMin = Math.min(vMin, v);
         vMax = Math.max(vMax, v);
       }
-      const span = projectionSpan(uMax - uMin, vMax - vMin);
+      // CASE1: bark-edge atlas UV — U across chord (A|B|C), V bottom→top.
+      // CASE2: planeD filter above already skipped older cut verts so their UVs stay.
       for (const vi of cutVerts) {
         tmp.fromBufferAttribute(pos, vi);
-        const mapped = aspectCorrectUv(tmp.dot(tangent), tmp.dot(bitangent), uMin, vMin, span);
+        const mapped = barkEdgeCutUv(
+          tmp.dot(tangent),
+          tmp.dot(bitangent),
+          uMin,
+          uMax,
+          vMin,
+          vMax,
+        );
         uvAttr.setXY(vi, mapped.u, mapped.v);
       }
       uvAttr.needsUpdate = true;
     }
 
+    // Coverage of pinata cut tris vs expected cleave rectangle (for optional seal skip).
+    let coverageRatio: number | undefined;
+    if (pinataCut && pinataCut.count >= 3) {
+      mesh.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(mesh);
+      const size = box.getSize(new THREE.Vector3());
+      const spanU =
+        Math.abs(localN.x) >= Math.abs(localN.z) ? size.z : size.x;
+      const expected = Math.max(0.12, spanU) * Math.max(0.15, size.y);
+      let area = 0;
+      const a = new THREE.Vector3();
+      const b = new THREE.Vector3();
+      const c = new THREE.Vector3();
+      const end = pinataCut.start + pinataCut.count;
+      for (let i = pinataCut.start; i + 2 < end; i += 3) {
+        const i0 = index.getX(i);
+        const i1 = index.getX(i + 1);
+        const i2 = index.getX(i + 2);
+        // Only count tris whose verts lie on this cleave (CASE1 / new plane).
+        if (planeD !== null) {
+          a.fromBufferAttribute(pos, i0);
+          if (Math.abs(a.dot(localN) - planeD) > 0.03) continue;
+        }
+        a.fromBufferAttribute(pos, i0);
+        b.fromBufferAttribute(pos, i1);
+        c.fromBufferAttribute(pos, i2);
+        area += cutTriAreaInPlane(
+          a.x, a.y, a.z,
+          b.x, b.y, b.z,
+          c.x, c.y, c.z,
+          tangent.x, tangent.y, tangent.z,
+          bitangent.x, bitangent.y, bitangent.z,
+        );
+      }
+      coverageRatio = cutFaceCoverageRatio(area, expected);
+    }
+
     // Reclassify every triangle → bark / endgrain / inner (3 materials).
     reclassifyPieceMaterials(mesh, planeNormal, mats);
 
-    // Always seal the cleave face: pinata often leaves holes with ≥8 cut tris
-    // (old `cutTriCount < 8` gate missed those → 破面 / sky through remnant).
-    if (shouldSealCutFace(cutTriCount)) {
+    // Seal when fill is sparse; skip redundant cutCap when coverage is solid.
+    if (shouldSealCutFace(cutTriCount, coverageRatio)) {
       mesh.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(mesh);
       const size = box.getSize(new THREE.Vector3());
@@ -684,13 +737,12 @@ export function createFractureWorld(
       const width = Math.max(0.12, spanU * 1.04);
       const height = Math.max(0.15, size.y * 1.02);
       const capGeo = new THREE.PlaneGeometry(width, height, 1, 1);
-      // Aspect-correct plane UVs (PlaneGeometry is already 0–1; scale V by height/width).
-      const sealSpan = projectionSpan(width, height);
+      // Bark-edge atlas UVs on the seal (U across chord, V along height).
       const sealUv = capGeo.attributes.uv as THREE.BufferAttribute;
       for (let i = 0; i < sealUv.count; i++) {
         const u0 = sealUv.getX(i);
         const v0 = sealUv.getY(i);
-        sealUv.setXY(i, (u0 * width) / sealSpan, (v0 * height) / sealSpan);
+        sealUv.setXY(i, u0, v0);
       }
       sealUv.needsUpdate = true;
       const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), localN);
@@ -1154,7 +1206,12 @@ export function createFractureWorld(
     else _tiltAxis.normalize();
     _tiltQ.setFromAxisAngle(_tiltAxis, sample.tipRad);
     _yawQ.setFromAxisAngle(up, t.yawRad * sample.ease);
-    _outQ.copy(t.baseQuat).multiply(_yawQ).multiply(_tiltQ);
+    // Package M roll about push (ease with tip) — small bank, not a fling.
+    _rollAxis.set(t.pushX, 0, t.pushZ);
+    if (_rollAxis.lengthSq() < 1e-8) _rollAxis.set(1, 0, 0);
+    else _rollAxis.normalize();
+    _rollQ.setFromAxisAngle(_rollAxis, t.rollRad * sample.ease);
+    _outQ.copy(t.baseQuat).multiply(_yawQ).multiply(_tiltQ).multiply(_rollQ);
 
     f.body.position.set(sample.x, sample.y, sample.z);
     f.mesh.position.set(sample.x, sample.y, sample.z);
@@ -1166,7 +1223,8 @@ export function createFractureWorld(
       // Thin-axis toY is only a mid-anim estimate — eccentric pinata AABBs float otherwise.
       _yawQ.setFromAxisAngle(up, t.yawRad);
       _tiltQ.setFromAxisAngle(_tiltAxis, t.tipRad);
-      _outQ.copy(t.baseQuat).multiply(_yawQ).multiply(_tiltQ);
+      _rollQ.setFromAxisAngle(_rollAxis, t.rollRad);
+      _outQ.copy(t.baseQuat).multiply(_yawQ).multiply(_tiltQ).multiply(_rollQ);
       f.mesh.position.set(t.toX, t.toY, t.toZ);
       f.mesh.quaternion.copy(_outQ);
       f.mesh.updateMatrixWorld(true);
@@ -1539,7 +1597,13 @@ export function createFractureWorld(
         dirZ = (nz / nLen) * side;
       }
     }
+    // Package M: push azimuth ±12°, forced outward (dot with base > 0).
+    const pushed = jitterPushAzimuthOutward(dirX, dirZ, TIP_DROP_PUSH_AZIMUTH_JIT_DEG);
+    dirX = pushed.ox;
+    dirZ = pushed.oz;
 
+    const restTang =
+      (Math.random() * 2 - 1) * TIP_DROP_REST_TANGENTIAL_JIT;
     const rest = tipDropRestPose({
       fromX: f.body.position.x,
       fromZ: f.body.position.z,
@@ -1549,12 +1613,15 @@ export function createFractureWorld(
       restRadial: opts?.scatter ? TIP_DROP_SCATTER_RADIAL : TIP_DROP_REST_RADIAL,
       restRadialJit: opts?.scatter ? TIP_DROP_SCATTER_RADIAL_JIT : TIP_DROP_REST_RADIAL_JIT,
       rnd: Math.random(),
+      restTangential: restTang,
       groundPad: TIP_DROP_GROUND_PAD,
     });
 
-    const tipDeg = TIP_DROP_ANGLE_DEG + Math.random() * TIP_DROP_ANGLE_JIT_DEG;
+    const tipDeg = sampleTipDropAngleDeg(Math.random());
     const yawRad =
       ((Math.random() * 2 - 1) * TIP_DROP_YAW_JIT_DEG * Math.PI) / 180;
+    const rollRad =
+      ((Math.random() * 2 - 1) * TIP_DROP_ROLL_JIT_DEG * Math.PI) / 180;
     const now = performance.now();
     const durationMs = TIP_DROP_DURATION_MS + Math.random() * TIP_DROP_DURATION_JIT_MS;
 
@@ -1562,6 +1629,8 @@ export function createFractureWorld(
     _settleBox.setFromObject(f.mesh);
     const halfX = Math.max(0.02, (_settleBox.max.x - _settleBox.min.x) * 0.5);
     const halfZ = Math.max(0.02, (_settleBox.max.z - _settleBox.min.z) * 0.5);
+    const hingeTang =
+      (Math.random() * 2 - 1) * TIP_DROP_HINGE_TANGENTIAL_JIT;
     const hinge = tipDropHingePoint({
       centerX: f.body.position.x,
       centerY: f.body.position.y,
@@ -1572,6 +1641,7 @@ export function createFractureWorld(
       halfX,
       halfZ,
       stumpLipRadius,
+      hingeTangential: hingeTang,
     });
 
     f.tipDrop = {
@@ -1590,6 +1660,7 @@ export function createFractureWorld(
       hingeZ: hinge.hingeZ,
       tipRad: (tipDeg * Math.PI) / 180,
       yawRad,
+      rollRad,
       arcHeight: TIP_DROP_ARC_HEIGHT,
       baseQuat: f.mesh.quaternion.clone(),
     };
