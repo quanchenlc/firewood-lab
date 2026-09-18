@@ -11,6 +11,7 @@ import {
   classifyBarkEdgeCase,
   classifyExteriorNormal,
   classifyFaceNormal,
+  cutCapAxesFromCleave,
   cutFaceCoverageRatio,
   cutTriAreaInPlane,
   estimateChordCover,
@@ -140,14 +141,47 @@ describe('classifyBarkEdgeCase + applyBarkEdgeCaseU', () => {
     const lo = applyBarkEdgeCaseU(0, 'C', le);
     const hi = applyBarkEdgeCaseU(1, 'C', le);
     const mid = applyBarkEdgeCaseU(0.5, 'C', le);
-    assert.ok(lo > BARK_EDGE_U_FRAC);
-    assert.ok(hi < 1 - BARK_EDGE_U_FRAC);
+    assert.ok(lo >= BARK_EDGE_U_FRAC);
+    assert.ok(hi <= 1 - BARK_EDGE_U_FRAC);
     assert.ok(Math.abs(mid - 0.5) < 1e-9);
     // Entire span avoids bark rims.
     for (let t = 0; t <= 10; t++) {
       const u = applyBarkEdgeCaseU(t / 10, 'C', le);
       assert.ok(u >= BARK_EDGE_U_FRAC && u <= 1 - BARK_EDGE_U_FRAC, `u=${u}`);
     }
+  });
+
+  it('CASE C with le≈1 still insets by BARK_EDGE_U_FRAC (no bark strips)', () => {
+    // Ref formula (1-le)/2+u*le collapses to full [0,1] when le=1 — wrong.
+    assert.ok(Math.abs(applyBarkEdgeCaseU(0, 'C', 1) - BARK_EDGE_U_FRAC) < 1e-9);
+    assert.ok(
+      Math.abs(applyBarkEdgeCaseU(1, 'C', 1) - (1 - BARK_EDGE_U_FRAC)) < 1e-9,
+    );
+    assert.ok(Math.abs(applyBarkEdgeCaseU(0.5, 'C', 1) - 0.5) < 1e-9);
+    for (let t = 0; t <= 10; t++) {
+      const u = applyBarkEdgeCaseU(t / 10, 'C', 1);
+      assert.ok(u >= BARK_EDGE_U_FRAC && u <= 1 - BARK_EDGE_U_FRAC, `u=${u}`);
+    }
+  });
+});
+
+describe('cutCapAxesFromCleave', () => {
+  it('aligns seal U with fill tangent (RH: X×Y = Z = -localN)', () => {
+    const localN = { x: 1, y: 0, z: 0 };
+    const tangent = { x: 0, y: 0, z: 1 }; // (-nz, 0, nx)
+    const bitangent = { x: 0, y: 1, z: 0 };
+    const axes = cutCapAxesFromCleave(tangent, bitangent, localN);
+    assert.equal(axes.x.x, tangent.x);
+    assert.equal(axes.x.z, tangent.z);
+    assert.equal(axes.y.y, 1);
+    assert.equal(axes.z.x, -1);
+    // X × Y ≈ Z
+    const cx = axes.x.y * axes.y.z - axes.x.z * axes.y.y;
+    const cy = axes.x.z * axes.y.x - axes.x.x * axes.y.z;
+    const cz = axes.x.x * axes.y.y - axes.x.y * axes.y.x;
+    assert.ok(Math.abs(cx - axes.z.x) < 1e-9);
+    assert.ok(Math.abs(cy - axes.z.y) < 1e-9);
+    assert.ok(Math.abs(cz - axes.z.z) < 1e-9);
   });
 });
 

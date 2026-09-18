@@ -13,7 +13,9 @@ import {
   isTooThinToSplit,
   MAX_LIVE_FRAGMENTS,
   MIN_RECHOP_DIAGONAL,
-  planRingPileSlots,
+  appendRingPileSlots,
+  createRingPileOccupancy,
+  clearRingPileOccupancy,
   RING_PILE_RADIUS,
   RING_PILE_RECYCLE_JIT_MS,
   RING_PILE_RECYCLE_MS,
@@ -50,6 +52,7 @@ import {
   barkEdgeCutUv,
   classifyBarkEdgeCase,
   classifyFaceNormal,
+  cutCapAxesFromCleave,
   cutFaceCoverageRatio,
   cutTriAreaInPlane,
   estimateChordCover,
@@ -148,6 +151,20 @@ export interface PhysFragment {
     toQy: number;
     toQz: number;
     toQw: number;
+  };
+  /**
+   * True after a successful recycle into a ring slot — pose is frozen;
+   * later scatter/recycle rounds must skip this piece (append-only pile).
+   */
+  inRing?: boolean;
+  /** Slot metadata from the recycle that seated this piece. */
+  ringSlot?: {
+    slotX: number;
+    slotGridY: number;
+    tier: number;
+    x: number;
+    y: number;
+    z: number;
   };
 }
 
@@ -267,6 +284,8 @@ export function createFractureWorld(
   world.addBody(stump);
 
   const fragments: PhysFragment[] = [];
+  /** Persisted XC-grid occupancy across rounds (append-only; cleared with pile). */
+  const ringOccupancy = createRingPileOccupancy();
   let lastCleaveDebug: FractureWorld['lastCleaveDebug'] = null;
   let accumulator = 0;
   const FIXED = 1 / 60;
@@ -485,11 +504,14 @@ export function createFractureWorld(
 
   function clearFragments(): void {
     while (fragments.length) removeFragment(0);
+    clearRingPileOccupancy(ringOccupancy);
   }
 
   function clearStumpPieces(): void {
     for (let i = fragments.length - 1; i >= 0; i--) {
       const f = fragments[i]!;
+      // Never evict seated ring chips — keepPile relies on them staying put.
+      if (f.inRing) continue;
       if (f.onStump || f.splittable || f.bounce || f.recycle) {
         removeFragment(i);
       }
@@ -500,6 +522,7 @@ export function createFractureWorld(
     // Drop tiny chips and enforce live cap.
     for (let i = fragments.length - 1; i >= 0; i--) {
       const f = fragments[i]!;
+      if (f.inRing) continue; // freeze ring occupancy / pose
       const diag = bboxDiagonal(f.mesh);
       if (diag < TINY_CHIP_DIAGONAL && !f.splittable && !f.onStump) {
         removeFragment(i);
@@ -507,9 +530,11 @@ export function createFractureWorld(
     }
     while (fragments.length > MAX_LIVE_FRAGMENTS) {
       // Prefer culling old ground-pile chips — never evict splittable stump
-      // pieces first (those are mid-split and about to become firewood).
-      let idx = fragments.findIndex((f) => !f.onStump && !f.splittable && !f.recycle);
-      if (idx < 0) idx = fragments.findIndex((f) => !f.onStump);
+      // pieces or seated ring chips first.
+      let idx = fragments.findIndex(
+        (f) => !f.onStump && !f.splittable && !f.recycle && !f.inRing,
+      );
+      if (idx < 0) idx = fragments.findIndex((f) => !f.onStump && !f.inRing);
       if (idx < 0) idx = fragments.findIndex((f) => f.onStump && !f.splittable);
       removeFragment(idx >= 0 ? idx : 0);
     }
@@ -659,13 +684,24 @@ export function createFractureWorld(
 
     // Bark-rim vert keys (ref `M` set): exterior side tris that are not caps.
     // Shared positions with the cut face mark true geometric bark edges.
+    // Coarser quantize + 26-neighbor probe — pinata often duplicates verts at
+    // ~1e-4 drift, so strict 1e4 keys miss the weld and false-CASE-C.
     const barkRimKeys = new Set<string>();
-    const keyScale = 1e4;
-    const vertKey = (vi: number): string => {
+    const keyScale = 1e3;
+    const vertKey = (vi: number): string =>
+      `${Math.round(pos.getX(vi) * keyScale)},${Math.round(pos.getY(vi) * keyScale)},${Math.round(pos.getZ(vi) * keyScale)}`;
+    const touchesBarkRim = (vi: number): boolean => {
       const x = Math.round(pos.getX(vi) * keyScale);
       const y = Math.round(pos.getY(vi) * keyScale);
       const z = Math.round(pos.getZ(vi) * keyScale);
-      return `${x},${y},${z}`;
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dz = -1; dz <= 1; dz++) {
+            if (barkRimKeys.has(`${x + dx},${y + dy},${z + dz}`)) return true;
+          }
+        }
+      }
+      return false;
     };
     const tmpN = new THREE.Vector3();
     const a = new THREE.Vector3();
@@ -716,7 +752,7 @@ export function createFractureWorld(
       let hasLeftBark = false;
       let hasRightBark = false;
       for (const vi of cutVerts) {
-        if (!barkRimKeys.has(vertKey(vi))) continue;
+        if (!touchesBarkRim(vi)) continue;
         tmp.fromBufferAttribute(pos, vi);
         if (tmp.dot(tangent) <= midU) hasLeftBark = true;
         else hasRightBark = true;
@@ -813,7 +849,17 @@ export function createFractureWorld(
         sealUv.setXY(i, applyBarkEdgeCaseU(u0, barkCase, chordCover), v0);
       }
       sealUv.needsUpdate = true;
-      const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), localN);
+      // Align seal U/V with fill tangent/bitangent (not free-twist setFromUnitVectors).
+      const capAxes = cutCapAxesFromCleave(
+        { x: tangent.x, y: tangent.y, z: tangent.z },
+        { x: bitangent.x, y: bitangent.y, z: bitangent.z },
+        { x: localN.x, y: localN.y, z: localN.z },
+      );
+      _axisX.set(capAxes.x.x, capAxes.x.y, capAxes.x.z);
+      _axisY.set(capAxes.y.x, capAxes.y.y, capAxes.y.z);
+      _axisZ.set(capAxes.z.x, capAxes.z.y, capAxes.z.z);
+      _basis.makeBasis(_axisX, _axisY, _axisZ);
+      const quat = new THREE.Quaternion().setFromRotationMatrix(_basis);
       const capMat =
         mats.inner && 'clone' in mats.inner
           ? (mats.inner.clone() as THREE.MeshStandardMaterial)
@@ -1561,10 +1607,17 @@ export function createFractureWorld(
           f.mesh.quaternion.copy(_toQ);
           f.body.quaternion.set(_toQ.x, _toQ.y, _toQ.z, _toQ.w);
           f.recycle = undefined;
+          f.inRing = true;
+          f.body.type = CANNON.Body.STATIC;
+          f.body.mass = 0;
+          f.body.updateMassProperties();
           f.body.sleep();
         }
         continue;
       }
+
+      // Seated ring chips: never re-enable physics / tip-drop.
+      if (f.inRing) continue;
 
       if (applyBouncePose(f, now)) continue;
       if (applyTipDropPose(f, now)) continue;
@@ -1586,7 +1639,7 @@ export function createFractureWorld(
 
   function sync(): void {
     for (const f of fragments) {
-      if (f.bounce || f.tipDrop || f.recycle) continue; // scripted pose owns this frame
+      if (f.inRing || f.bounce || f.tipDrop || f.recycle) continue; // scripted / frozen
       f.mesh.position.set(f.body.position.x, f.body.position.y, f.body.position.z);
       f.mesh.quaternion.set(
         f.body.quaternion.x,
@@ -1786,18 +1839,20 @@ export function createFractureWorld(
   /** Convert stump halves to tip-drop firewood onto the yard (round complete). */
   function scatterToGround(): void {
     for (const f of fragments) {
+      // Append-only pile: already-seated ring chips keep their world pose.
+      if (f.inRing || f.recycle) continue;
       beginFirewoodTipDrop(f, undefined, undefined, { scatter: true });
     }
   }
 
-  /** Slide every live fragment into a neat annular pile around the chopping block. */
+  /** Slide every *new* live fragment into free annular slots (skip inRing). */
   function recycleToRing(opts?: { radius?: number; groundY?: number }): void {
     const radius = opts?.radius ?? RING_PILE_RADIUS;
     const groundY = opts?.groundY ?? YARD_GROUND_Y;
     const now = performance.now();
     // Larger chips first → they form the crescent base (closer to ref settle order).
     const live = fragments
-      .filter((f) => f.mesh.visible)
+      .filter((f) => f.mesh.visible && !f.inRing)
       .sort((a, b) => {
         const sa = localBBoxSize(a.mesh);
         const sb = localBBoxSize(b.mesh);
@@ -1829,7 +1884,8 @@ export function createFractureWorld(
       halfWidths.push(Math.max(0.04, sorted[1]! * 0.48));
       rnds.push(Math.random(), Math.random());
     }
-    const slots = planRingPileSlots(n, {
+    // Append into persisted occupancy — prior rounds' slots stay filled.
+    const slots = appendRingPileSlots(n, ringOccupancy, {
       radius,
       groundYBase: groundY,
       halfHeights,
@@ -1877,6 +1933,15 @@ export function createFractureWorld(
       // Restore current pose — recycle animator owns the lerp.
       f.mesh.position.set(fromX, fromY, fromZ);
       f.mesh.quaternion.set(fromQx, fromQy, fromQz, fromQw);
+
+      f.ringSlot = {
+        slotX: slot.slotX,
+        slotGridY: slot.slotGridY,
+        tier: slot.tier,
+        x: slot.x,
+        y: settledY,
+        z: slot.z,
+      };
 
       f.recycle = {
         startAt: now + i * RING_PILE_STAGGER_MS,

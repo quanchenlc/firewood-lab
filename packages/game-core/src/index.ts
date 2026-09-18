@@ -79,7 +79,10 @@ export {
   RING_PILE_RECYCLE_JIT_MS,
   RING_PILE_STAGGER_MS,
   planRingPileSlots,
+  appendRingPileSlots,
   pickRingPileNextSlot,
+  createRingPileOccupancy,
+  clearRingPileOccupancy,
   ringPileSimToWorldAxes,
   pickLocalGrainAxis,
   isCrossSectionXThinner,
@@ -105,4 +108,6 @@ export {
   type SplitStyle,
   type TooThinChopDecision,
   type RingPileSlot,
+  type RingPileOccupancy,
+  type RingPilePlanOpts,
 } from './fracture-plan.ts';
