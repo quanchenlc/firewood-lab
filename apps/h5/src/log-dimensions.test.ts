@@ -80,7 +80,7 @@ describe('log-dimensions (firewood-scale round)', () => {
     assert.ok(STUMP_HEIGHT >= 0.28 && STUMP_HEIGHT <= 0.4);
   });
 
-  it('sampleLogRound matches reference inch ranges (4.5–8 r, 12–16 h)', () => {
+  it('sampleLogRound matches tuned inch ranges (5–8.5 r, 13–17 h)', () => {
     const rand = lcg(0xc0ffee41);
     for (let i = 0; i < 64; i++) {
       const d = sampleLogRound(rand);
@@ -91,6 +91,8 @@ describe('log-dimensions (firewood-scale round)', () => {
       assert.ok(d.radiusTop <= d.radiusBot + 1e-12);
       assert.ok(d.radiusTop >= d.radiusBot * 0.88 - 1e-9);
       assert.ok(d.radiusBot < STUMP_TOP_RADIUS, 'sampled bot radius must fit stump');
+      // Leave margin for bark / plan silhouette so the round does not overhang.
+      assert.ok(d.radiusBot * 1.35 + BARK_AMP_IN * INCH < STUMP_TOP_RADIUS);
     }
   });
 

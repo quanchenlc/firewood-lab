@@ -13,19 +13,26 @@
  *   We also add a mild low-frequency ellipse + lobe scale so the overall
  *   silhouette reads as an imperfect stump circle, not a clean cylinder.
  *
- * Sized so AABB × VOLUME_BBOX_FILL (0.7) volume lands in ~0.7k–3.5k in³ across
+ * Sized so AABB × VOLUME_BBOX_FILL (0.7) volume lands in ~0.9k–3.5k in³ across
  * the random range — workable with FIREWOOD_VOL_ABS_MIN=250 / FIREWOOD_VOL_MAX=500
  * (thresholds unchanged). Mid defaults keep framing close to the prior fixed round.
+ *
+ * Visual retune vs stockier stump (STUMP_* ≈ 0.34/0.40/0.34): inch ranges sit a
+ * modest ~8% above the pure reference so the round reads larger on the block,
+ * while max bot radius (+ bark) still seats inside the stump top with margin.
  */
 
 export const INCH = 0.0254;
 
-/** Reference radius range (inches), from `(9+rand*7)/2`. */
-export const LOG_RADIUS_IN_MIN = 4.5;
-export const LOG_RADIUS_IN_MAX = 8;
-/** Reference height range (inches), from `12+rand*4`. */
-export const LOG_HEIGHT_IN_MIN = 12;
-export const LOG_HEIGHT_IN_MAX = 16;
+/**
+ * Radius range (inches). Reference was `(9+rand*7)/2` → 4.5…8;
+ * bumped slightly so the round fills the stump top better.
+ */
+export const LOG_RADIUS_IN_MIN = 5;
+export const LOG_RADIUS_IN_MAX = 8.5;
+/** Height range (inches). Reference was `12+rand*4` → 12…16; modest bump. */
+export const LOG_HEIGHT_IN_MIN = 13;
+export const LOG_HEIGHT_IN_MAX = 17;
 
 /** Bark irregularity (reference `qu` / `Ju`), in inches. */
 export const BARK_AMP_IN = 0.4;
@@ -56,8 +63,8 @@ export const STUMP_HEIGHT = 0.34;
 
 /** Orbit look-at Y ≈ stump top + half default log height. */
 export const CAM_LOOK_AT_Y = STUMP_HEIGHT + LOG_HEIGHT * 0.5;
-/** Closer orbit so the smaller round still fills first-person framing. */
-export const CAM_RADIUS = 2.95;
+/** Orbit distance — slightly out so the modestly larger round still frames cleanly. */
+export const CAM_RADIUS = 3.05;
 
 export interface LogRoundDims {
   /** Metres. */

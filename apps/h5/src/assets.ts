@@ -255,7 +255,7 @@ export async function buildChoppingBlock(
   const bottomMat = barkMat.clone();
   bottomMat.color = new THREE.Color(0x5a4030);
 
-  // Matched to the smaller choppable round in `log-dimensions.ts`.
+  // Sized for the choppable round in `log-dimensions.ts` (stump top > max log + bark).
   // Organic silhouette (not a clean cylinder) — same plan-noise family as the log.
   const TOP_R = STUMP_TOP_RADIUS;
   const BOT_R = STUMP_BOT_RADIUS;
