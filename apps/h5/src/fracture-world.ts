@@ -1362,12 +1362,20 @@ export function createFractureWorld(
 
     const halfHeights: number[] = [];
     const halfWidths: number[] = [];
+    const sizeXs: number[] = [];
+    const sizeYs: number[] = [];
+    const sizeZs: number[] = [];
     const rnds: number[] = [];
     for (let i = 0; i < n; i++) {
       const f = live[i]!;
       f.mesh.updateMatrixWorld(true);
-      const size = new THREE.Box3().setFromObject(f.mesh).getSize(new THREE.Vector3());
-      const sorted = [size.x, size.y, size.z].sort((a, b) => a - b);
+      const worldSize = new THREE.Box3().setFromObject(f.mesh).getSize(new THREE.Vector3());
+      // Local geom AABB for `_simToWorld` thin-axis / grain (world AABB for packing).
+      const local = localBBoxSize(f.mesh, worldSize);
+      sizeXs.push(local.x);
+      sizeYs.push(local.y);
+      sizeZs.push(local.z);
+      const sorted = [worldSize.x, worldSize.y, worldSize.z].sort((a, b) => a - b);
       halfHeights.push(Math.max(0.03, sorted[0]! * 0.45));
       // Arc packing uses mid extent (lying length/width along tangent).
       halfWidths.push(Math.max(0.04, sorted[1]! * 0.48));
@@ -1378,6 +1386,9 @@ export function createFractureWorld(
       groundYBase: groundY,
       halfHeights,
       halfWidths,
+      sizeXs,
+      sizeYs,
+      sizeZs,
       rnds,
     });
 

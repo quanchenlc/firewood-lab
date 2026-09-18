@@ -121,6 +121,8 @@ export const RING_PILE_RECYCLE_JIT_MS = 180;
 /** Stagger between piece starts (ms). */
 export const RING_PILE_STAGGER_MS = 35;
 
+export type Vec3Tuple = readonly [number, number, number];
+
 export interface RingPileSlot {
   /** World XZ on the annular pile. */
   x: number;
@@ -132,13 +134,195 @@ export interface RingPileSlot {
   tier: number;
   /** Roll about the radial axis (radians). */
   roll: number;
+  /** True when local cross-section X < Z (reference `_getCrossSection2D`). */
+  isXThinner: boolean;
   /**
    * Orientation basis matching reference `_simToWorld` (piece lying on side):
    * column0 / column1 / column2 as XYZ unit axes of the local frame.
+   * Right-handed; local grain (Y when Y is longest) maps roughly horizontal.
    */
-  axisX: readonly [number, number, number];
-  axisY: readonly [number, number, number];
-  axisZ: readonly [number, number, number];
+  axisX: Vec3Tuple;
+  axisY: Vec3Tuple;
+  axisZ: Vec3Tuple;
+}
+
+function v3(x: number, y: number, z: number): [number, number, number] {
+  return [x, y, z];
+}
+
+function vDot(a: Vec3Tuple, b: Vec3Tuple): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function vCross(a: Vec3Tuple, b: Vec3Tuple): [number, number, number] {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+
+function vScale(a: Vec3Tuple, s: number): [number, number, number] {
+  return [a[0] * s, a[1] * s, a[2] * s];
+}
+
+function vAdd(a: Vec3Tuple, b: Vec3Tuple): [number, number, number] {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+
+function vNorm(a: Vec3Tuple): [number, number, number] {
+  const len = Math.hypot(a[0], a[1], a[2]);
+  if (len < 1e-12) return [0, 0, 0];
+  return [a[0] / len, a[1] / len, a[2] / len];
+}
+
+/** Scalar triple product = det of basis with columns (c0,c1,c2). */
+export function basisDeterminant(c0: Vec3Tuple, c1: Vec3Tuple, c2: Vec3Tuple): number {
+  return vDot(c0, vCross(c1, c2));
+}
+
+/**
+ * Pick which local AABB axis is grain (longest upright cylinder axis).
+ * Prefer Y on ties so stump-cut / Voronoi pieces (Y-up log) stay stable.
+ */
+export function pickLocalGrainAxis(
+  sizeX: number,
+  sizeY: number,
+  sizeZ: number,
+): 0 | 1 | 2 {
+  // Longest wins; tie-break Y → Z → X (log grain defaults to local Y).
+  const ranked: Array<{ ax: 0 | 1 | 2; v: number; pref: number }> = [
+    { ax: 1, v: sizeY, pref: 0 },
+    { ax: 2, v: sizeZ, pref: 1 },
+    { ax: 0, v: sizeX, pref: 2 },
+  ];
+  ranked.sort((a, b) => b.v - a.v || a.pref - b.pref);
+  return ranked[0]!.ax;
+}
+
+/**
+ * Reference `_getCrossSection2D` thin-axis flag when grain is local Y:
+ * `isXThinner = size.x < size.z`.
+ */
+export function isCrossSectionXThinner(sizeX: number, sizeZ: number): boolean {
+  return sizeX < sizeZ;
+}
+
+/**
+ * Rotate vector `v` about unit axis `axis` by `rad` (Rodrigues).
+ */
+function rotateAboutAxis(v: Vec3Tuple, axis: Vec3Tuple, rad: number): [number, number, number] {
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  const d = vDot(axis, v);
+  return vAdd(
+    vAdd(vScale(v, c), vScale(vCross(axis, v), s)),
+    vScale(axis, d * (1 - c)),
+  );
+}
+
+/** World Y π flip used by reference `_simToWorld` after the side-lie basis. */
+function premultiplyWorldYPi(v: Vec3Tuple): [number, number, number] {
+  return [-v[0], v[1], -v[2]];
+}
+
+/**
+ * Reference FirewoodPile `_simToWorld` rest basis (logic only).
+ *
+ * Non-thin: `makeBasis(-tangent, radial, up)` then roll about radial, then π about world Y.
+ * Thin (`size.x < size.z`): `makeBasis(up, radial, tangent)` then same post-multiplies.
+ * `tangent = up × radial` — using −tangent keeps the basis right-handed.
+ *
+ * When grain is not local Y, remaps so the longest (grain) local axis lies horizontal
+ * along −radial after the π-Y flip (AABB-aware for odd Voronoi extents).
+ */
+export function ringPileSimToWorldAxes(input: {
+  angle: number;
+  roll?: number;
+  /** Local AABB sizes (metres). Defaults treat Y as grain, X≈Z (non-thin). */
+  sizeX?: number;
+  sizeY?: number;
+  sizeZ?: number;
+  /** Override thin-axis branch; default from sizeX < sizeZ when grain is Y. */
+  isXThinner?: boolean;
+}): {
+  axisX: [number, number, number];
+  axisY: [number, number, number];
+  axisZ: [number, number, number];
+  isXThinner: boolean;
+  grainAxis: 0 | 1 | 2;
+} {
+  const sizeX = Math.max(1e-6, input.sizeX ?? 0.2);
+  const sizeY = Math.max(1e-6, input.sizeY ?? 0.35);
+  const sizeZ = Math.max(1e-6, input.sizeZ ?? 0.2);
+  const grainAxis = pickLocalGrainAxis(sizeX, sizeY, sizeZ);
+  const roll = input.roll ?? 0;
+
+  const radial = vNorm(v3(Math.cos(input.angle), 0, Math.sin(input.angle)));
+  const up = v3(0, 1, 0);
+  // tangent = up × radial  (right-handed with radial, up)
+  const tangent = vNorm(vCross(up, radial));
+
+  // Cross-section axes = the two non-grain local axes; thinner → world up.
+  const cross: Array<0 | 1 | 2> = ([0, 1, 2] as const).filter((a) => a !== grainAxis);
+  const c0 = cross[0]!;
+  const c1 = cross[1]!;
+  const sizes = [sizeX, sizeY, sizeZ];
+  const thinFirst = sizes[c0]! < sizes[c1]!;
+  const thinAxis = thinFirst ? c0 : c1;
+  const wideAxis = thinFirst ? c1 : c0;
+  const isXThinner =
+    input.isXThinner ??
+    (grainAxis === 1 ? isCrossSectionXThinner(sizeX, sizeZ) : thinAxis === 0);
+
+  // Reference Y-grain columns before roll / πY:
+  //   thin:    (up, radial, tangent)
+  //   nonthin: (-tangent, radial, up)
+  // Generalize: grain → radial, thin → up (or X→up when thin), wide → ±tangent.
+  const localCols: Array<[number, number, number]> = [
+    v3(0, 0, 0),
+    v3(0, 0, 0),
+    v3(0, 0, 0),
+  ];
+
+  if (grainAxis === 1) {
+    // Exact reference `_simToWorld` for Y-up logs.
+    if (isXThinner) {
+      localCols[0] = up;
+      localCols[1] = radial;
+      localCols[2] = tangent;
+    } else {
+      localCols[0] = vScale(tangent, -1);
+      localCols[1] = radial;
+      localCols[2] = up;
+    }
+  } else {
+    // AABB remapping when grain ≠ Y: grain→radial, thin→up, complete RH triad.
+    localCols[grainAxis] = radial;
+    localCols[thinAxis] = up;
+    // wide = grain × thin  (so columns grain, thin, wide form RH — then assign to axes)
+    let wideDir = vNorm(vCross(localCols[grainAxis], localCols[thinAxis]));
+    // Prefer aligning wide with ±tangent for a tidy crescent look.
+    if (vDot(wideDir, tangent) < 0) wideDir = vScale(wideDir, -1);
+    localCols[wideAxis] = wideDir;
+    // Ensure full XYZ basis is right-handed; flip wide if needed.
+    if (basisDeterminant(localCols[0], localCols[1], localCols[2]) < 0) {
+      localCols[wideAxis] = vScale(localCols[wideAxis], -1);
+    }
+  }
+
+  // Premultiply roll about radial, then π about world Y (reference order).
+  const afterRoll = localCols.map((col) => rotateAboutAxis(col, radial, roll));
+  const final = afterRoll.map((col) => premultiplyWorldYPi(col)) as Array<
+    [number, number, number]
+  >;
+
+  // Tiny numeric normalize.
+  const axisX = vNorm(final[0]!);
+  const axisY = vNorm(final[1]!);
+  const axisZ = vNorm(final[2]!);
+
+  return { axisX, axisY, axisZ, isXThinner, grainAxis };
 }
 
 /**
@@ -160,6 +344,12 @@ export function planRingPileSlots(
     halfHeights?: number[];
     /** Approximate half-width along the arc (metres); defaults to halfHeights. */
     halfWidths?: number[];
+    /** Local AABB sizes for `_simToWorld` thin-axis / grain (metres). */
+    sizeXs?: number[];
+    sizeYs?: number[];
+    sizeZs?: number[];
+    /** Per-piece thin-axis override (length ≥ count). */
+    isXThinners?: boolean[];
     /** Injected [0,1) samples for jitter (length ≥ count*2 preferred). */
     rnds?: number[];
   },
@@ -203,15 +393,17 @@ export function planRingPileSlots(
     const y = groundBase + halfH + RING_PILE_GROUND_PAD + stackLift;
     const roll = (rndB - 0.5) * 2 * RING_PILE_ROLL_JIT;
 
-    const ux = ox;
-    const uz = oz;
-    const tx = uz;
-    const tz = -ux;
-    const c = Math.cos(roll);
-    const s = Math.sin(roll);
-    const axisX: [number, number, number] = [tx * c, s, tz * c];
-    const axisY: [number, number, number] = [ux, 0, uz];
-    const axisZ: [number, number, number] = [-tx * s, c, -tz * s];
+    const sizeX = opts?.sizeXs?.[i] ?? halfW * 2;
+    const sizeY = opts?.sizeYs?.[i] ?? halfH * 4; // grain defaults longer than cross-section
+    const sizeZ = opts?.sizeZs?.[i] ?? halfW * 2;
+    const orient = ringPileSimToWorldAxes({
+      angle: ang,
+      roll,
+      sizeX,
+      sizeY,
+      sizeZ,
+      isXThinner: opts?.isXThinners?.[i],
+    });
 
     slots.push({
       x: ox * r,
@@ -220,9 +412,10 @@ export function planRingPileSlots(
       yaw: ang,
       tier,
       roll,
-      axisX,
-      axisY,
-      axisZ,
+      isXThinner: orient.isXThinner,
+      axisX: orient.axisX,
+      axisY: orient.axisY,
+      axisZ: orient.axisZ,
     });
   }
   return slots;
