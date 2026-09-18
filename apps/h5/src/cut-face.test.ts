@@ -7,7 +7,10 @@ import {
   aspectCorrectUv,
   classifyExteriorNormal,
   classifyFaceNormal,
+  cutFaceCoverageRatio,
+  hasReclassifiedInnerSlot,
   projectionSpan,
+  shouldSealCutFace,
 } from './cut-face.ts';
 
 describe('classifyFaceNormal', () => {
@@ -78,5 +81,41 @@ describe('aspectCorrectUv', () => {
     const top = aspectCorrectUv(0.4, 1.2, 0, 0, span);
     assert.ok(Math.abs(top.u - 0.4 / 1.2) < 1e-9);
     assert.equal(top.v, 1);
+  });
+});
+
+describe('hasReclassifiedInnerSlot', () => {
+  const bark = { id: 'bark' };
+  const end = { id: 'end' };
+  const inner = { id: 'inner' };
+
+  it('fresh cylinder [bark, end, end] is NOT an inner slot', () => {
+    // materialIndex 2 is the bottom endgrain — must not feed pinata interior.
+    assert.equal(hasReclassifiedInnerSlot([bark, end, end], inner), false);
+  });
+
+  it('post-reclassify [bark, end, inner] IS an inner slot', () => {
+    assert.equal(hasReclassifiedInnerSlot([bark, end, inner], inner), true);
+  });
+
+  it('two-slot pinata [bark, inner] is false (handled by groups.length===2)', () => {
+    assert.equal(hasReclassifiedInnerSlot([bark, inner], inner), false);
+  });
+});
+
+describe('shouldSealCutFace', () => {
+  it('always seals — old cutTriCount<8 gate missed holed faces with 8+ tris', () => {
+    // Regression: pinata left ~17% coverage with exactly 8 cut tris; <8 skipped seal.
+    assert.equal(shouldSealCutFace(0), true);
+    assert.equal(shouldSealCutFace(7), true);
+    assert.equal(shouldSealCutFace(8), true);
+    assert.equal(shouldSealCutFace(40), true);
+  });
+});
+
+describe('cutFaceCoverageRatio', () => {
+  it('flags sparse fill as a hole', () => {
+    assert.ok(cutFaceCoverageRatio(0.02, 0.12) < 0.85);
+    assert.ok(cutFaceCoverageRatio(0.12, 0.12) >= 0.99);
   });
 });

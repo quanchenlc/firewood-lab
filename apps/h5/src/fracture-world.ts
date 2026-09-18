@@ -42,7 +42,9 @@ import {
 import {
   aspectCorrectUv,
   classifyFaceNormal,
+  hasReclassifiedInnerSlot,
   projectionSpan,
+  shouldSealCutFace,
 } from './cut-face';
 import { setShadowFlags } from './shadows';
 
@@ -519,6 +521,11 @@ export function createFractureWorld(
     const exterior: number[] = [];
     const interior: number[] = [];
     const groups = geo.groups;
+    // Only fold materialIndex 2 into pinata "interior" after a real 3-slot
+    // reclassify (arr[2] === inner). Fresh CylinderGeometry is
+    // [side, top, bottom] — bottom must stay exterior or pinata mixes the
+    // endgrain disk into cut-face triangulation (holes + wrong mats).
+    const innerSlotReady = hasReclassifiedInnerSlot(mesh.material, mats.inner);
 
     if (groups.length === 0) {
       for (let i = 0; i < index.count; i++) exterior.push(index.getX(i));
@@ -529,11 +536,11 @@ export function createFractureWorld(
         for (let i = g.start; i < end; i++) dest.push(index.getX(i));
       }
     } else {
-      // 3-slot layout from reclassify: 0=bark, 1=endgrain, 2=inner
-      // Also handles CylinderGeometry [side, top, bottom] before first chop.
+      // Post-reclassify: 0=bark, 1=endgrain, 2=inner.
+      // Fresh cylinder: 0=side, 1=top, 2=bottom — all exterior when !innerSlotReady.
       for (const g of groups) {
         const mi = g.materialIndex ?? 0;
-        const dest = mi === 2 ? interior : exterior;
+        const dest = innerSlotReady && mi === 2 ? interior : exterior;
         const end = g.start + g.count;
         for (let i = g.start; i < end; i++) dest.push(index.getX(i));
       }
@@ -653,13 +660,18 @@ export function createFractureWorld(
     // Reclassify every triangle → bark / endgrain / inner (3 materials).
     reclassifyPieceMaterials(mesh, planeNormal, mats);
 
-    // Hollow / sparse cut face only: synthesize a rectangular seal at the cut centroid.
-    if (cutTriCount < 8) {
+    // Always seal the cleave face: pinata often leaves holes with ≥8 cut tris
+    // (old `cutTriCount < 8` gate missed those → 破面 / sky through remnant).
+    if (shouldSealCutFace(cutTriCount)) {
       mesh.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(mesh);
       const size = box.getSize(new THREE.Vector3());
-      const width = Math.max(0.15, Math.max(size.x, size.z) * 0.9);
-      const height = Math.max(0.2, size.y * 0.95);
+      // Size from piece AABB on the cut plane (not sparse cutVerts — those
+      // undersize when triangulation only filled half the face).
+      const spanU =
+        Math.abs(localN.x) >= Math.abs(localN.z) ? size.z : size.x;
+      const width = Math.max(0.12, spanU * 1.04);
+      const height = Math.max(0.15, size.y * 1.02);
       const capGeo = new THREE.PlaneGeometry(width, height, 1, 1);
       // Aspect-correct plane UVs (PlaneGeometry is already 0–1; scale V by height/width).
       const sealSpan = projectionSpan(width, height);
@@ -680,9 +692,27 @@ export function createFractureWorld(
               side: THREE.DoubleSide,
             });
       if ('side' in capMat) capMat.side = THREE.DoubleSide;
+      // Ensure photographic side-grain (clone keeps map; fallback solid tint).
+      if ('polygonOffset' in capMat) {
+        capMat.polygonOffset = true;
+        capMat.polygonOffsetFactor = -1;
+        capMat.polygonOffsetUnits = -1;
+      }
 
       const localPos = new THREE.Vector3();
-      if (cutVerts.size >= 3) {
+      const worldCenter = box.getCenter(new THREE.Vector3());
+      const localCenter = mesh.worldToLocal(worldCenter.clone());
+      if (planeD !== null) {
+        // Project piece center onto this cleave plane — stable when cutVerts
+        // only cover a corner of a holed face.
+        localPos
+          .copy(localCenter)
+          .addScaledVector(localN, planeD - localN.dot(localCenter));
+        // Nudge into the empty half-space (away from solid) so the seal is not
+        // buried inside remaining tris / depth-fighting the pinata fill.
+        const sideSign = Math.sign(localN.dot(localCenter) - planeD) || 1;
+        localPos.addScaledVector(localN, -sideSign * 0.004);
+      } else if (cutVerts.size >= 3) {
         const avg = new THREE.Vector3();
         const tmp = new THREE.Vector3();
         for (const vi of cutVerts) {
@@ -692,19 +722,25 @@ export function createFractureWorld(
         avg.multiplyScalar(1 / cutVerts.size);
         localPos.copy(avg);
       } else {
-        const center = box.getCenter(new THREE.Vector3());
-        const extent = Math.abs(localN.x) * size.x * 0.5 + Math.abs(localN.z) * size.z * 0.5;
-        const toOrigin = new THREE.Vector3(-center.x, 0, -center.z);
+        const extent =
+          Math.abs(localN.x) * size.x * 0.5 + Math.abs(localN.z) * size.z * 0.5;
+        const toOrigin = new THREE.Vector3(-localCenter.x, 0, -localCenter.z);
         const sideSign = Math.sign(toOrigin.dot(localN)) || 1;
-        const worldCapPos = center.clone().addScaledVector(localN, sideSign * extent * 0.92);
-        mesh.worldToLocal(worldCapPos);
-        localPos.copy(worldCapPos);
+        localPos
+          .copy(localCenter)
+          .addScaledVector(localN, sideSign * extent * 0.92);
       }
 
       for (const child of [...mesh.children]) {
         if (child.userData?.role === 'cutCap') {
           mesh.remove(child);
-          (child as THREE.Mesh).geometry?.dispose();
+          const prev = child as THREE.Mesh;
+          prev.geometry?.dispose();
+          const prevMat = prev.material;
+          if (prevMat && !Array.isArray(prevMat) && 'dispose' in prevMat) {
+            // Seal mats are clones — safe to dispose.
+            (prevMat as THREE.Material).dispose();
+          }
         }
       }
 
@@ -712,7 +748,7 @@ export function createFractureWorld(
       cap.quaternion.copy(quat);
       cap.position.copy(localPos);
       cap.userData.role = 'cutCap';
-      cap.renderOrder = 1;
+      cap.renderOrder = 2;
       cap.castShadow = true;
       cap.receiveShadow = true;
       mesh.add(cap);

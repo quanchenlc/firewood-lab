@@ -1173,6 +1173,7 @@ async function boot(): Promise<void> {
         matCount: number;
         groups: Array<{ materialIndex: number; count: number }>;
         maps: Array<{ i: number; map?: string; color?: string }>;
+        cutCap?: { count: number; map?: string; side?: number };
       }> = [];
       const visit = (mesh: THREE.Mesh, role: string) => {
         const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
@@ -1194,7 +1195,25 @@ async function boot(): Promise<void> {
             color: m?.color ? `#${m.color.getHexString()}` : undefined,
           };
         });
-        report.push({ role, matCount: mats.length, groups, maps });
+        let cutCap: { count: number; map?: string; side?: number } | undefined;
+        const caps = mesh.children.filter((c) => c.userData?.role === 'cutCap');
+        if (caps.length > 0) {
+          const capMesh = caps[0] as THREE.Mesh;
+          const capMat = (
+            Array.isArray(capMesh.material) ? capMesh.material[0] : capMesh.material
+          ) as THREE.MeshStandardMaterial | undefined;
+          const mapSrc = capMat?.map?.image
+            ? ((capMat.map.image as HTMLImageElement).currentSrc ||
+                (capMat.map.image as HTMLImageElement).src ||
+                '(image)')
+            : undefined;
+          cutCap = {
+            count: caps.length,
+            map: mapSrc?.split('/').slice(-2).join('/'),
+            side: capMat?.side,
+          };
+        }
+        report.push({ role, matCount: mats.length, groups, maps, cutCap });
       };
       visit(logScene.logMesh, 'log');
       for (const f of logScene.fracture.fragments) {
