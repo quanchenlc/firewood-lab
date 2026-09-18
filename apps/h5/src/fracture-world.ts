@@ -1652,16 +1652,12 @@ export function createFractureWorld(
       const fromQz = f.mesh.quaternion.z;
       const fromQw = f.mesh.quaternion.w;
 
-      // AABB-min settle at final ring orientation; keep intentional stack lift
-      // encoded above the thin-axis heuristic floor in planRingPileSlots.
-      const halfH = halfHeights[i] ?? 0.05;
-      const heuristicFloor = groundY + halfH + RING_PILE_GROUND_PAD;
-      const stackExtra = Math.max(0, slot.y - heuristicFloor);
+      // AABB-min settle: bottom on ground + physicalBaseY (stack lift from XC grid).
       f.mesh.position.set(slot.x, 0, slot.z);
       f.mesh.quaternion.copy(_toQ);
       f.mesh.updateMatrixWorld(true);
       _settleBox.setFromObject(f.mesh);
-      const settledY = settlePositionY(_settleBox.min.y, groundY + stackExtra);
+      const settledY = settlePositionY(_settleBox.min.y, groundY + slot.physicalBaseY);
       // Restore current pose — recycle animator owns the lerp.
       f.mesh.position.set(fromX, fromY, fromZ);
       f.mesh.quaternion.set(fromQx, fromQy, fromQz, fromQw);

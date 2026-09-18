@@ -170,6 +170,8 @@ export interface RingPileSlot {
   slotX: number;
   /** Discrete stack level (0 = ground). */
   slotGridY: number;
+  /** Physical base height above ground before piece half-thickness (metres). */
+  physicalBaseY: number;
   /**
    * Orientation basis matching reference `_simToWorld` (piece lying on side):
    * column0 / column1 / column2 as XYZ unit axes of the local frame.
@@ -513,6 +515,7 @@ export function planRingPileSlots(
       isXThinner: orient.isXThinner,
       slotX: slot.x,
       slotGridY: slot.y,
+      physicalBaseY,
       axisX: orient.axisX,
       axisY: orient.axisY,
       axisZ: orient.axisZ,

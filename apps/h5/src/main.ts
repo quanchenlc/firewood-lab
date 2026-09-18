@@ -958,6 +958,8 @@ async function boot(): Promise<void> {
     nudgeAzimuth: (sign: number) => logScene.nudgeAzimuth(sign),
     getOrbit: () => logScene.getOrbit(),
     setOrbit: (yaw: number, pitch: number) => logScene.setOrbit(yaw, pitch),
+    setCamRadius: (r: number) => logScene.setCamRadius(r),
+    getCamRadius: () => logScene.getCamRadius(),
     /** Select smallest stump piece without chopping (peek / force paths). */
     selectSmallest: () => {
       if (roundFinishing || chopping) return false;
