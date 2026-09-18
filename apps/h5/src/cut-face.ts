@@ -129,20 +129,21 @@ export function hasReclassifiedInnerSlot(
  * Whether to synthesize a rectangular cutCap seal over the cleave face.
  *
  * three-pinata's constrained Delaunay fill frequently leaves holes on sparse
- * fills. When triangulation is dense enough (and optional coverage says so),
- * skip the extra DoubleSide plane to avoid z-fight / double grain.
+ * fills. Prefer sealing so the bark-edge atlas reads on a clean A|B|C plane;
+ * only skip when triangulation is both dense and high-coverage (avoids z-fight).
  */
 export function shouldSealCutFace(
   cutTriCount: number,
   coverageRatio?: number,
 ): boolean {
   // Sparse / empty fill — always seal (regression: ≥8 tris still had holes).
-  if (cutTriCount < 12) return true;
+  if (cutTriCount < 16) return true;
   if (coverageRatio != null) {
-    return coverageRatio < 0.88;
+    // Only skip when fill is essentially complete.
+    return coverageRatio < 0.95;
   }
-  // Unknown coverage: only seal until the fill looks dense.
-  return cutTriCount < 28;
+  // Unknown coverage: seal unless the fill looks very dense.
+  return cutTriCount < 48;
 }
 
 /**

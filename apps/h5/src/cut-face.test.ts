@@ -126,17 +126,17 @@ describe('hasReclassifiedInnerSlot', () => {
 });
 
 describe('shouldSealCutFace', () => {
-  it('seals sparse fills; skips when dense + high coverage', () => {
+  it('seals sparse fills; skips only when dense + very high coverage', () => {
     assert.equal(shouldSealCutFace(0), true);
     assert.equal(shouldSealCutFace(7), true);
-    assert.equal(shouldSealCutFace(11), true);
+    assert.equal(shouldSealCutFace(15), true);
     // Dense without coverage → still seal until heuristic threshold.
-    assert.equal(shouldSealCutFace(20), true);
-    assert.equal(shouldSealCutFace(40), false);
+    assert.equal(shouldSealCutFace(30), true);
+    assert.equal(shouldSealCutFace(60), false);
     // Explicit coverage wins.
-    assert.equal(shouldSealCutFace(40, 0.5), true);
-    assert.equal(shouldSealCutFace(16, 0.95), false);
-    assert.equal(shouldSealCutFace(16, 0.8), true);
+    assert.equal(shouldSealCutFace(60, 0.5), true);
+    assert.equal(shouldSealCutFace(20, 0.97), false);
+    assert.equal(shouldSealCutFace(20, 0.9), true);
   });
 });
 
