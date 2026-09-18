@@ -74,8 +74,11 @@ export const TIP_DROP_ANGLE_DEG = 78;
 export const TIP_DROP_ANGLE_JIT_DEG = 14;
 /** Tiny yaw while tipping (±degrees). */
 export const TIP_DROP_YAW_JIT_DEG = 8;
-/** Soft mid-arc lift (metres) — barely leaves the stump lip, no pop. */
-export const TIP_DROP_ARC_HEIGHT = 0.028;
+/**
+ * Mid-arc lift (metres). Option B tip-drop is a pure stump-lip hinge — keep 0
+ * so chips lean over the edge instead of a center-of-mass fling with lift.
+ */
+export const TIP_DROP_ARC_HEIGHT = 0;
 /**
  * Rest radial band beside the stump (metres from origin).
  * Stump visual R≈0.34 / collider ≥0.35 — keep chips clear of the top face
@@ -933,8 +936,104 @@ export function tipDropRestPose(input: {
 }
 
 /**
+ * Outward tip axis (tangential): cross(up, push) so +θ tips the top with push.
+ * Axis is horizontal and perpendicular to the outward slide direction.
+ */
+export function tipDropOutwardAxis(
+  dirX: number,
+  dirZ: number,
+): { ax: number; ay: number; az: number } {
+  const { ox, oz } = normalizePushXZ(dirX, dirZ);
+  // cross((0,1,0), (ox,0,oz)) = (oz, 0, -ox)
+  return { ax: oz, ay: 0, az: -ox };
+}
+
+/**
+ * AABB half-extent along a unit XZ direction (distance from center to face).
+ */
+export function aabbExtentAlongXZ(
+  dirX: number,
+  dirZ: number,
+  halfX: number,
+  halfZ: number,
+): number {
+  const { ox, oz } = normalizePushXZ(dirX, dirZ);
+  const hx = Math.max(1e-4, halfX);
+  const hz = Math.max(1e-4, halfZ);
+  let t = Infinity;
+  if (Math.abs(ox) > 1e-8) t = Math.min(t, hx / Math.abs(ox));
+  if (Math.abs(oz) > 1e-8) t = Math.min(t, hz / Math.abs(oz));
+  if (!Number.isFinite(t)) return Math.min(hx, hz);
+  return Math.max(0.02, t);
+}
+
+/**
+ * Stump-lip hinge: bottom outer edge of the piece in the push direction.
+ * Y sits on the piece underside (≈ stump top); XZ at the outward AABB face,
+ * softly pulled out to the stump lip when the chip starts well inside the top.
+ */
+export function tipDropHingePoint(input: {
+  centerX: number;
+  centerY: number;
+  centerZ: number;
+  dirX: number;
+  dirZ: number;
+  /** World Y of the piece underside (AABB min.y). */
+  bottomY: number;
+  halfX: number;
+  halfZ: number;
+  /** Stump top radius — hinge nudged toward lip when piece is inward. */
+  stumpLipRadius?: number;
+}): { hingeX: number; hingeY: number; hingeZ: number; ox: number; oz: number } {
+  const { ox, oz } = normalizePushXZ(input.dirX, input.dirZ);
+  const extent = aabbExtentAlongXZ(ox, oz, input.halfX, input.halfZ);
+  let hingeX = input.centerX + ox * extent;
+  let hingeZ = input.centerZ + oz * extent;
+  const lipR = input.stumpLipRadius;
+  if (lipR != null && lipR > 0) {
+    const hR = Math.hypot(hingeX, hingeZ);
+    // Pieces near the center: place hinge on the stump lip along push.
+    if (hR < lipR * 0.85) {
+      hingeX = ox * lipR;
+      hingeZ = oz * lipR;
+    }
+  }
+  // Contact plane ≈ stump top / piece bottom — never above the mesh center.
+  const hingeY = Math.min(input.bottomY, input.centerY - 0.01);
+  return { hingeX, hingeY, hingeZ, ox, oz };
+}
+
+/** Rotate offset (ox,oy,oz) by `rad` around unit axis (ax,ay,az) — Rodrigues. */
+export function rotateOffsetAroundAxis(
+  ox: number,
+  oy: number,
+  oz: number,
+  ax: number,
+  ay: number,
+  az: number,
+  rad: number,
+): { x: number; y: number; z: number } {
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  const dot = ax * ox + ay * oy + az * oz;
+  // R·v = v·c + (a×v)·s + a·(a·v)·(1−c)
+  const cx = ay * oz - az * oy;
+  const cy = az * ox - ax * oz;
+  const cz = ax * oy - ay * ox;
+  const oneMinus = 1 - c;
+  return {
+    x: ox * c + cx * s + ax * dot * oneMinus,
+    y: oy * c + cy * s + ay * dot * oneMinus,
+    z: oz * c + cz * s + az * dot * oneMinus,
+  };
+}
+
+/**
  * Sample a scripted tip-drop pose at progress u∈[0,1].
- * Lateral slide + soft arc + outward tip (no abrupt velocity set).
+ * Option B: rotate about stump-lip hinge, then ease an outward slide.
+ *   pos = hinge + R(θ)·(center−hinge) + outwardSlide·ease
+ *   θ   = tipRad·ease
+ * Arc height defaults to 0 (no mid-flight lift).
  */
 export function sampleTipDropPose(input: {
   u: number;
@@ -945,15 +1044,39 @@ export function sampleTipDropPose(input: {
   toY: number;
   toZ: number;
   tipRad: number;
+  hingeX: number;
+  hingeY: number;
+  hingeZ: number;
+  /** Outward push hint — defines the tangential tip axis. */
+  dirX: number;
+  dirZ: number;
+  /** @deprecated Option B keeps 0; retained for call-site compat. */
   arcHeight?: number;
 }): { x: number; y: number; z: number; tipRad: number; ease: number } {
   const ease = easeSmoothstep(input.u);
-  const arc = (input.arcHeight ?? TIP_DROP_ARC_HEIGHT) * Math.sin(Math.PI * Math.min(1, Math.max(0, input.u)));
+  const theta = input.tipRad * ease;
+  const { ax, ay, az } = tipDropOutwardAxis(input.dirX, input.dirZ);
+
+  const offX = input.fromX - input.hingeX;
+  const offY = input.fromY - input.hingeY;
+  const offZ = input.fromZ - input.hingeZ;
+  const rotated = rotateOffsetAroundAxis(offX, offY, offZ, ax, ay, az, theta);
+
+  // Slide vector chosen so u=1 lands exactly on the rest target (pre AABB settle).
+  const endRot = rotateOffsetAroundAxis(offX, offY, offZ, ax, ay, az, input.tipRad);
+  const slideX = input.toX - (input.hingeX + endRot.x);
+  const slideY = input.toY - (input.hingeY + endRot.y);
+  const slideZ = input.toZ - (input.hingeZ + endRot.z);
+
+  const arc =
+    (input.arcHeight ?? TIP_DROP_ARC_HEIGHT) *
+    Math.sin(Math.PI * Math.min(1, Math.max(0, input.u)));
+
   return {
-    x: input.fromX + (input.toX - input.fromX) * ease,
-    y: input.fromY + (input.toY - input.fromY) * ease + arc,
-    z: input.fromZ + (input.toZ - input.fromZ) * ease,
-    tipRad: input.tipRad * ease,
+    x: input.hingeX + rotated.x + slideX * ease,
+    y: input.hingeY + rotated.y + slideY * ease + arc,
+    z: input.hingeZ + rotated.z + slideZ * ease,
+    tipRad: theta,
     ease,
   };
 }
