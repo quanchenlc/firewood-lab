@@ -1188,6 +1188,7 @@ async function boot(): Promise<void> {
         groups: Array<{ materialIndex: number; count: number }>;
         maps: Array<{ i: number; map?: string; color?: string }>;
         cutCap?: { count: number; map?: string; side?: number };
+        innerTriCount?: number;
       }> = [];
       const visit = (mesh: THREE.Mesh, role: string) => {
         const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
@@ -1210,6 +1211,7 @@ async function boot(): Promise<void> {
           };
         });
         let cutCap: { count: number; map?: string; side?: number } | undefined;
+        // Legacy PlaneGeometry veneer — Option 1 removes these; expect count 0.
         const caps = mesh.children.filter((c) => c.userData?.role === 'cutCap');
         if (caps.length > 0) {
           const capMesh = caps[0] as THREE.Mesh;
@@ -1227,7 +1229,15 @@ async function boot(): Promise<void> {
             side: capMat?.side,
           };
         }
-        report.push({ role, matCount: mats.length, groups, maps, cutCap });
+        const innerGroup = groups.find((g) => g.materialIndex === 2);
+        report.push({
+          role,
+          matCount: mats.length,
+          groups,
+          maps,
+          cutCap,
+          innerTriCount: innerGroup ? Math.floor(innerGroup.count / 3) : 0,
+        });
       };
       visit(logScene.logMesh, 'log');
       for (const f of logScene.fracture.fragments) {

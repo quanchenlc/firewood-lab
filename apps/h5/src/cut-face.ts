@@ -63,7 +63,7 @@ export function classifyFaceNormal(
 /**
  * Aspect-correct planar UV: both axes share `span` (usually max(uSpan, vSpan)).
  * Returns u,v relative to (uMin, vMin) — does NOT independently normalize to [0,1]².
- * Kept for cutCap seal sizing / legacy tests.
+ * Kept for legacy tests / diagnostics.
  */
 export function aspectCorrectUv(
   u: number,
@@ -171,12 +171,11 @@ export function applyBarkEdgeCaseU(
 }
 
 /**
- * Right-handed cutCap axes matching pinata fill U/V:
- *   plane +X = tangent (U), +Y = bitangent (V), +Z = -localN
+ * Right-handed cut-plane frame matching pinata fill U/V:
+ *   +X = tangent (U), +Y = bitangent (V), +Z = -localN
  * because `tangent × bitangent = -localN` for Y-up cleaves.
  *
- * Using `setFromUnitVectors(Z→localN)` alone leaves twist free and often
- * aligns plane +X with **-tangent** (dot ≈ -1) → CASE B bark on the wrong side.
+ * Kept for UV-frame tests / diagnostics (no longer drives a PlaneGeometry seal).
  */
 export function cutCapAxesFromCleave(
   tangent: Vec3,
@@ -188,6 +187,119 @@ export function cutCapAxesFromCleave(
     y: { x: bitangent.x, y: bitangent.y, z: bitangent.z },
     z: { x: -localN.x, y: -localN.y, z: -localN.z },
   };
+}
+
+/** Point projected into the cut-plane tangent/bitangent frame. */
+export interface PlanarPoint {
+  i: number;
+  u: number;
+  v: number;
+}
+
+/**
+ * Order cut-boundary verts into a closed contour by angle around the centroid
+ * in the (tangent, bitangent) plane. Dedupes near-duplicates.
+ *
+ * Used to triangulate a flush seal from real bark-edge ∩ plane verts
+ * (Option 1) instead of an AABB PlaneGeometry veneer.
+ */
+export function orderContourInPlane(
+  points: PlanarPoint[],
+  dupEps = 1e-4,
+): number[] {
+  if (points.length < 3) return points.map((p) => p.i);
+  let cu = 0;
+  let cv = 0;
+  for (const p of points) {
+    cu += p.u;
+    cv += p.v;
+  }
+  cu /= points.length;
+  cv /= points.length;
+  const sorted = [...points].sort(
+    (a, b) =>
+      Math.atan2(a.v - cv, a.u - cu) - Math.atan2(b.v - cv, b.u - cu),
+  );
+  const out: PlanarPoint[] = [];
+  for (const p of sorted) {
+    const prev = out[out.length - 1];
+    if (
+      prev &&
+      Math.abs(prev.u - p.u) < dupEps &&
+      Math.abs(prev.v - p.v) < dupEps
+    ) {
+      continue;
+    }
+    if (prev && prev.i === p.i) continue;
+    out.push(p);
+  }
+  // Drop closing duplicate of first (same position).
+  const first = out[0];
+  const last = out[out.length - 1];
+  if (
+    out.length >= 2 &&
+    first &&
+    last &&
+    Math.abs(first.u - last.u) < dupEps &&
+    Math.abs(first.v - last.v) < dupEps
+  ) {
+    out.pop();
+  }
+  const ids = out.map((p) => p.i);
+  return ids.length >= 3 ? ids : points.map((p) => p.i);
+}
+
+/**
+ * Fan-triangulate an ordered contour through a centroid vertex index.
+ *
+ * @param flipWinding when true, reverse winding (fragment on -localN side).
+ *   With `tangent × bitangent = -localN`, a CCW fan in (u,v) faces -localN;
+ *   flip when the solid sits on the -localN half so the cap faces outward.
+ */
+export function fanTriangulateContour(
+  contour: number[],
+  centroidIndex: number,
+  flipWinding: boolean,
+): number[] {
+  const tris: number[] = [];
+  if (contour.length < 3) return tris;
+  for (let i = 0; i < contour.length; i++) {
+    const i0 = contour[i]!;
+    const i1 = contour[(i + 1) % contour.length]!;
+    if (i0 === i1 || i0 === centroidIndex || i1 === centroidIndex) continue;
+    if (!flipWinding) tris.push(centroidIndex, i0, i1);
+    else tris.push(centroidIndex, i1, i0);
+  }
+  return tris;
+}
+
+/**
+ * Deterministic ±amp micro-displacement along `axis` for rough-cut feel.
+ * Hash is stable for a given vertex index (no Math.random).
+ */
+export function roughCutOffset(vertIndex: number, amp = 0.0008): number {
+  // Simple LCG-ish mix → [0,1)
+  const h = (Math.imul(vertIndex ^ 0x9e3779b9, 0x85ebca6b) >>> 0) / 4294967296;
+  return (h - 0.5) * 2 * amp;
+}
+
+/**
+ * Whether a contour seal should be appended when pinata fill is sparse.
+ * Same thresholds as the old rectangular cutCap path — dense high-coverage
+ * fills skip the extra seal to avoid z-fighting.
+ */
+export function shouldSealCutFace(
+  cutTriCount: number,
+  coverageRatio?: number,
+): boolean {
+  // Sparse / empty fill — always seal (regression: ≥8 tris still had holes).
+  if (cutTriCount < 16) return true;
+  if (coverageRatio != null) {
+    // Only skip when fill is essentially complete.
+    return coverageRatio < 0.95;
+  }
+  // Unknown coverage: seal unless the fill looks very dense.
+  return cutTriCount < 48;
 }
 
 /**
@@ -214,27 +326,6 @@ export function hasReclassifiedInnerSlot(
   if (inner == null) return false;
   const arr = Array.isArray(materials) ? materials : [materials];
   return arr.length >= 3 && arr[2] === inner;
-}
-
-/**
- * Whether to synthesize a rectangular cutCap seal over the cleave face.
- *
- * three-pinata's constrained Delaunay fill frequently leaves holes on sparse
- * fills. Prefer sealing so the bark-edge atlas reads on a clean plane;
- * only skip when triangulation is both dense and high-coverage (avoids z-fight).
- */
-export function shouldSealCutFace(
-  cutTriCount: number,
-  coverageRatio?: number,
-): boolean {
-  // Sparse / empty fill — always seal (regression: ≥8 tris still had holes).
-  if (cutTriCount < 16) return true;
-  if (coverageRatio != null) {
-    // Only skip when fill is essentially complete.
-    return coverageRatio < 0.95;
-  }
-  // Unknown coverage: seal unless the fill looks very dense.
-  return cutTriCount < 48;
 }
 
 /**
