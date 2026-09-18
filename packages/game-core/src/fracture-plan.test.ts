@@ -42,6 +42,10 @@ import {
   thicknessInchesAlong,
   tipDropRestPose,
   volumeInchesFromBBox,
+  ringPileSimToWorldAxes,
+  pickLocalGrainAxis,
+  isCrossSectionXThinner,
+  basisDeterminant,
 } from './fracture-plan.ts';
 
 describe('planFracture', () => {
@@ -445,5 +449,105 @@ describe('planRingPileSlots (reference FirewoodPile arc)', () => {
     const r0 = Math.hypot(tier0[0]!.x, tier0[0]!.z);
     const r1 = Math.hypot(tier1[0]!.x, tier1[0]!.z);
     assert.ok(r1 > r0 + RING_PILE_TIER_DEPTH * 0.5);
+  });
+
+  it('ring rest axes are right-handed and grain lies horizontal', () => {
+    const slots = planRingPileSlots(4, {
+      halfHeights: [0.05, 0.05, 0.05, 0.05],
+      halfWidths: [0.06, 0.06, 0.06, 0.06],
+      sizeXs: [0.22, 0.12, 0.22, 0.12],
+      sizeYs: [0.4, 0.4, 0.4, 0.4],
+      sizeZs: [0.18, 0.25, 0.18, 0.25],
+      rnds: Array.from({ length: 8 }, () => 0.5),
+    });
+    for (const s of slots) {
+      const det = basisDeterminant(s.axisX, s.axisY, s.axisZ);
+      assert.ok(det > 0.85, `expected RH basis, det=${det}`);
+      // Local grain (Y) world Y-component must be small → side-lying, not stump-vertical.
+      assert.ok(
+        Math.abs(s.axisY[1]) < 0.2,
+        `grain axisY.y=${s.axisY[1]} should be near horizontal`,
+      );
+    }
+    assert.equal(slots[0]!.isXThinner, false);
+    assert.equal(slots[1]!.isXThinner, true);
+  });
+});
+
+describe('ringPileSimToWorldAxes (reference _simToWorld parity)', () => {
+  const ang = (320 * Math.PI) / 180;
+  const radial = [Math.cos(ang), 0, Math.sin(ang)] as const;
+  const up = [0, 1, 0] as const;
+  const tangent = [
+    up[1] * radial[2] - up[2] * radial[1],
+    up[2] * radial[0] - up[0] * radial[2],
+    up[0] * radial[1] - up[1] * radial[0],
+  ] as const;
+
+  it('non-thin branch: right-handed, grain→−radial, Z→up (after πY)', () => {
+    const o = ringPileSimToWorldAxes({
+      angle: ang,
+      roll: 0,
+      sizeX: 0.25,
+      sizeY: 0.4,
+      sizeZ: 0.18,
+    });
+    assert.equal(o.isXThinner, false);
+    assert.equal(o.grainAxis, 1);
+    assert.ok(basisDeterminant(o.axisX, o.axisY, o.axisZ) > 0.9);
+    // After π about Y: grain Y → −radial
+    assert.ok(Math.abs(o.axisY[0] - -radial[0]) < 1e-9);
+    assert.ok(Math.abs(o.axisY[2] - -radial[2]) < 1e-9);
+    assert.ok(Math.abs(o.axisY[1]) < 1e-9);
+    assert.ok(Math.abs(o.axisZ[0] - up[0]) < 1e-9);
+    assert.ok(Math.abs(o.axisZ[1] - up[1]) < 1e-9);
+    // X → +tangent after πY (reference makeBasis(−T,R,U) then Ryπ)
+    assert.ok(Math.abs(o.axisX[0] - tangent[0]) < 1e-9);
+    assert.ok(Math.abs(o.axisX[2] - tangent[2]) < 1e-9);
+  });
+
+  it('thin-axis branch: local X → world up, grain still horizontal', () => {
+    const o = ringPileSimToWorldAxes({
+      angle: ang,
+      roll: 0,
+      sizeX: 0.12,
+      sizeY: 0.4,
+      sizeZ: 0.28,
+    });
+    assert.equal(o.isXThinner, true);
+    assert.ok(basisDeterminant(o.axisX, o.axisY, o.axisZ) > 0.9);
+    assert.ok(Math.abs(o.axisX[1] - 1) < 1e-9, 'thin X maps to world up');
+    assert.ok(Math.abs(o.axisY[1]) < 1e-9, 'grain Y stays horizontal');
+    assert.ok(Math.hypot(o.axisY[0], o.axisY[2]) > 0.9);
+  });
+
+  it('left-handed +tangent basis is rejected (det would be negative)', () => {
+    // Document the bug we fixed: makeBasis(+T, R, U) is left-handed.
+    const badDet = basisDeterminant(tangent, radial, up);
+    assert.ok(badDet < -0.9, `+tangent basis must be LH, det=${badDet}`);
+    const good = ringPileSimToWorldAxes({ angle: ang, sizeX: 0.2, sizeY: 0.4, sizeZ: 0.2 });
+    assert.ok(basisDeterminant(good.axisX, good.axisY, good.axisZ) > 0.9);
+  });
+
+  it('isCrossSectionXThinner / pickLocalGrainAxis helpers', () => {
+    assert.equal(isCrossSectionXThinner(0.1, 0.2), true);
+    assert.equal(isCrossSectionXThinner(0.3, 0.2), false);
+    assert.equal(pickLocalGrainAxis(0.2, 0.5, 0.2), 1);
+    assert.equal(pickLocalGrainAxis(0.6, 0.2, 0.2), 0);
+    assert.equal(pickLocalGrainAxis(0.2, 0.2, 0.7), 2);
+  });
+
+  it('AABB remapping keeps longest local axis horizontal when grain ≠ Y', () => {
+    const o = ringPileSimToWorldAxes({
+      angle: ang,
+      roll: 0,
+      sizeX: 0.55,
+      sizeY: 0.18,
+      sizeZ: 0.2,
+    });
+    assert.equal(o.grainAxis, 0);
+    // Local X (grain) world Y component small.
+    assert.ok(Math.abs(o.axisX[1]) < 0.2, `grain X.y=${o.axisX[1]}`);
+    assert.ok(basisDeterminant(o.axisX, o.axisY, o.axisZ) > 0.85);
   });
 });
