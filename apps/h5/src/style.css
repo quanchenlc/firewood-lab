@@ -461,6 +461,38 @@ select {
   transform: scale(0.96);
 }
 
+.mute-fab {
+  position: absolute;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  z-index: 4;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  border: 1px solid rgba(212, 165, 116, 0.28);
+  background: rgba(18, 12, 8, 0.4);
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  opacity: 0.65;
+}
+
+.mute-fab:hover {
+  opacity: 1;
+}
+
+.mute-fab:active {
+  transform: scale(0.96);
+}
+
+.mute-fab[data-muted='true'] {
+  opacity: 0.85;
+  color: var(--accent);
+}
+
 .is-hidden {
   display: none !important;
 }

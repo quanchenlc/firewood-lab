@@ -24,6 +24,17 @@ Cut-face (inner / side-grain) maps are photographic longitudinal wood from Poly 
 | `sky/kloofendal_48d_partly_cloudy_puresky/sky_1k.hdr` | kloofendal_48d_partly_cloudy_puresky (1K HDR source) | https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky | CC0 |
 | `sky/kloofendal_48d_partly_cloudy_puresky/sky_2k.jpg` | same (tonemapped equirect, resized 2K for mobile) | https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky | CC0 |
 
+## Audio (CC0 only — no screen.toys / shapiro500 audio)
+
+Timing & rough mix were reverse-engineered from [screen.toys/firewood](https://screen.toys/firewood/) behavior (BGM ~0.4, chop SFX at blade impact / split). **No audio binaries were downloaded or redistributed from that site.**
+
+| Local path | Source | URL | License |
+|------------|--------|-----|---------|
+| `audio/bgm-forest.mp3` | Forest (trimmed/normalized loop) — Joseph Sardin / BigSoundBank | https://bigsoundbank.com/birds-s0100.html | CC0 |
+| `audio/chop-1.mp3` … `chop-6.mp3` | Ax on Wood (individual hits extracted) — Joseph Sardin / BigSoundBank | https://bigsoundbank.com/ax-on-wood-s0536.html | CC0 |
+| `audio/nick.mp3` | wood_cracking_01 — rubberduck / OpenGameArt “100 CC0 metal and wood SFX” | https://opengameart.org/content/100-cc0-metal-and-wood-sfx | CC0 |
+| `audio/nudge-01.mp3` `nudge-03.mp3` `nudge-05.mp3` | wood_hit_01 / 03 / 05 — same pack | https://opengameart.org/content/100-cc0-metal-and-wood-sfx | CC0 |
+
 Refresh / re-download (network required):
 
 ```bash

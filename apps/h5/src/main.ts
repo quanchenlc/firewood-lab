@@ -14,15 +14,27 @@ import {
   type Species,
 } from '@firewood/game-core';
 import { axes, species } from '@firewood/content';
-import { createH5Platform } from '@firewood/platform';
+import {
+  chopPlaybackJitter,
+  createH5Platform,
+  H5Audio,
+} from '@firewood/platform';
 import { preloadContentAssets } from './assets';
+import { assetUrl } from './asset-url';
 import { DEBUG_DIRECT_CHOP, forceBarEnabled } from './debug-flags';
 import { detectWeakDevice } from './fracture-world';
 import { createLogScene, tintLog } from './log-scene';
+import { H5_SOUND_BANK } from './sound-bank';
 
 type Phase = 'aim' | 'power' | 'result';
 
-const platform = createH5Platform();
+const platform = createH5Platform({
+  audio: {
+    bank: H5_SOUND_BANK,
+    resolveUrl: assetUrl,
+  },
+});
+const audio = platform.audio as H5Audio;
 platform.storage.setItem(
   'firewood.h5.loop',
   DEBUG_DIRECT_CHOP ? 'debug-direct-chop-option-a-v1' : 'camera-facing-recycle-v1',
@@ -49,6 +61,7 @@ const rhythmKnob = document.querySelector<HTMLDivElement>('#rhythm-knob')!;
 const sweetZone = document.querySelector<HTMLDivElement>('#sweet-zone')!;
 const forcePreview = document.querySelector<HTMLParagraphElement>('#force-preview')!;
 const againBtn = document.querySelector<HTMLButtonElement>('#again-btn')!;
+const muteBtn = document.querySelector<HTMLButtonElement>('#mute-btn')!;
 const resultEl = document.querySelector<HTMLParagraphElement>('#result')!;
 
 const labels: Record<ChopOutcome, string> = {
@@ -98,7 +111,29 @@ function closeChips(): void {
   setChipOpen(axeChip, axePanel, axeChipBtn, false);
 }
 
+function syncMuteUi(): void {
+  const muted = audio.isMuted();
+  muteBtn.dataset.muted = muted ? 'true' : 'false';
+  muteBtn.setAttribute('aria-pressed', String(muted));
+  muteBtn.setAttribute('aria-label', muted ? '取消静音' : '静音');
+  muteBtn.textContent = muted ? '静' : '音';
+}
+
+/** Unlock AudioContext + soft outdoor BGM on first user gesture. */
+function unlockAudioFromGesture(): void {
+  void audio.unlock().then(() => {
+    audio.ensureBgm(0.4);
+  });
+}
+
 async function boot(): Promise<void> {
+  const storedMute = platform.storage.getItem('firewood.h5.muted') === '1';
+  audio.setMuted(storedMute);
+  syncMuteUi();
+
+  setLoader(0.02, '加载环境音与斧声…');
+  await audio.preload();
+
   const preloaded = await preloadContentAssets(species, axes, setLoader);
   const logScene = createLogScene(canvas, preloaded.choppingBlock, {
     weakDevice,
@@ -351,7 +386,6 @@ async function boot(): Promise<void> {
     aimGeneration = frag?.generation ?? (obj.userData.generation as number) ?? 0;
 
     logScene.clearMarker();
-    platform.audio.play('aim', { volume: 0.25 });
 
     if (DEBUG_DIRECT_CHOP) {
       // Debug: no rhythm bar / lock — chop immediately at this hit + live facing.
@@ -404,6 +438,8 @@ async function boot(): Promise<void> {
 
       if (decision === 'toss') {
         logScene.fracture.tossAsFirewood(aimTarget, { planeNormal });
+        // Soft wood tap — not a full cleave (screen.toys-style quieter secondary SFX).
+        audio.play('nudge', { volume: 0.45, playbackRate: 0.92 + Math.random() * 0.1 });
         resultEl.textContent = '成柴 · 落地';
         resultEl.className = 'result sweet';
         resultFadeTimer = window.setTimeout(() => {
@@ -422,6 +458,7 @@ async function boot(): Promise<void> {
 
       const sign = pointerNdc.x < 0 ? -1 : 1;
       logScene.nudgeAzimuth(sign);
+      audio.play('nudge', { volume: 0.32, playbackRate: 1.05 + Math.random() * 0.1 });
       resultEl.textContent = '太薄 · 换角度';
       resultEl.className = 'result too_light';
       resultFadeTimer = window.setTimeout(() => {
@@ -465,7 +502,6 @@ async function boot(): Promise<void> {
     buzz(outcome);
     logScene.punchScale(outcome === 'too_heavy' ? 0.08 : outcome === 'sweet' ? 0.04 : 0.02);
     logScene.setShake(outcome === 'too_heavy' ? 0.1 : outcome === 'too_light' ? 0.04 : 0.06);
-    platform.audio.play(`chop:${outcome}`, { volume: 0.55 });
     platform.storage.setItem('firewood.h5.lastOutcome', outcome);
 
     const plan = planFracture({
@@ -475,9 +511,15 @@ async function boot(): Promise<void> {
       generation,
     });
 
-    // Resolve crack / nick at blade impact so the stump stays unchanged on rebound.
+    // Resolve crack / nick + chop SFX at blade impact (~axe arrival).
+    // Timing matches screen.toys: SFX fires with the split, not on pointer-down.
     impactTimer = window.setTimeout(() => {
       impactTimer = null;
+      const jitter = chopPlaybackJitter(outcome);
+      audio.play(`chop:${outcome}`, {
+        volume: jitter.volume,
+        playbackRate: jitter.playbackRate,
+      });
       if (plan.nickOnly) {
         logScene.playNick(point);
         logScene.clearMarker();
@@ -601,8 +643,29 @@ async function boot(): Promise<void> {
 
   againBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    unlockAudioFromGesture();
     resetRound();
   });
+
+  muteBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    unlockAudioFromGesture();
+    const next = !audio.isMuted();
+    audio.setMuted(next);
+    platform.storage.setItem('firewood.h5.muted', next ? '1' : '0');
+    syncMuteUi();
+  });
+
+  // First tap anywhere unlocks AudioContext (mobile autoplay policy).
+  const unlockOnce = () => {
+    unlockAudioFromGesture();
+    window.removeEventListener('pointerdown', unlockOnce, true);
+    window.removeEventListener('touchstart', unlockOnce, true);
+    window.removeEventListener('keydown', unlockOnce, true);
+  };
+  window.addEventListener('pointerdown', unlockOnce, true);
+  window.addEventListener('touchstart', unlockOnce, { capture: true, passive: true });
+  window.addEventListener('keydown', unlockOnce, true);
 
   const DRAG_PX = 10;
   let pointerId: number | null = null;
@@ -615,6 +678,7 @@ async function boot(): Promise<void> {
   platform.input.attach(canvas);
   platform.input.onPointer((sample) => {
     if (sample.phase === 'down') {
+      unlockAudioFromGesture();
       pointerId = sample.pointerId;
       downX = sample.x;
       downY = sample.y;

@@ -18,7 +18,8 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --test src/h5/audio.test.ts"
   },
   "devDependencies": {
     "typescript": "^5.8.2"
