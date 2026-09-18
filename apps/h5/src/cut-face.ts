@@ -77,6 +77,48 @@ export function projectionSpan(uSpan: number, vSpan: number): number {
   return Math.max(1e-6, uSpan, vSpan);
 }
 
+/**
+ * True when `materials[2]` is the side-grain inner slot from a prior
+ * `reclassifyPieceMaterials` pass — not CylinderGeometry's bottom endgrain.
+ *
+ * Fresh logs use `material = [bark, endgrain, endgrain]` while `innerMat` lives
+ * only in userData. Treating materialIndex 2 as "cut" on a fresh cylinder feeds
+ * the bottom cap into pinata's interior group and contaminates cut triangulation.
+ */
+export function hasReclassifiedInnerSlot(
+  materials: unknown,
+  inner: unknown,
+): boolean {
+  if (inner == null) return false;
+  const arr = Array.isArray(materials) ? materials : [materials];
+  return arr.length >= 3 && arr[2] === inner;
+}
+
+/**
+ * Whether to synthesize a rectangular cutCap seal over the cleave face.
+ *
+ * three-pinata's constrained Delaunay fill frequently leaves holes even when
+ * `cutTriCount >= 8` (observed ~17% coverage with exactly 8 tris on irregular
+ * bark). The old `cutTriCount < 8` gate skipped those cases → 破面.
+ *
+ * Always seal: a DoubleSide side-grain plane sized to the piece AABB covers
+ * holes without regressing bark/endgrain on other groups.
+ */
+export function shouldSealCutFace(_cutTriCount: number): boolean {
+  return true;
+}
+
+/**
+ * Coverage of vertical cut tris vs the expected rectangle (height × span).
+ * Used in tests / diagnostics; values ≪ 1 mean a visible hole.
+ */
+export function cutFaceCoverageRatio(
+  alignedCutArea: number,
+  expectedArea: number,
+): number {
+  return alignedCutArea / Math.max(1e-9, expectedArea);
+}
+
 /** Shared photographic side-grain maps (Poly Haven ash_veneer, CC0). */
 export const SIDEGRAIN_DIFF = 'assets/facegrain/sidegrain_diff.jpg';
 export const SIDEGRAIN_NOR = 'assets/facegrain/sidegrain_nor.jpg';
