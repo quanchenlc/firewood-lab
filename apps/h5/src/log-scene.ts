@@ -315,7 +315,8 @@ export function createLogScene(
   });
   const ground = new THREE.Mesh(new THREE.CircleGeometry(7.2, weak ? 48 : 64), groundMat);
   ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -0.01;
+  // Align with tip-drop / ring AABB settle + physics Plane (YARD_GROUND_Y = 0).
+  ground.position.y = 0;
   ground.receiveShadow = false;
   scene.add(ground);
 
