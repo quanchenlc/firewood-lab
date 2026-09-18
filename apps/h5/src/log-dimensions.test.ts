@@ -20,6 +20,7 @@ import {
   PLAN_LOBE3_AMP,
   STUMP_HEIGHT,
   STUMP_TOP_RADIUS,
+  STUMP_BOT_RADIUS,
   barkNoise,
   camLookAtY,
   defaultLogRound,
@@ -68,6 +69,15 @@ describe('log-dimensions (firewood-scale round)', () => {
     assert.ok(LOG_HEIGHT > 0.25 && LOG_HEIGHT < 0.5);
     assert.equal(CAM_LOOK_AT_Y, STUMP_HEIGHT + LOG_HEIGHT * 0.5);
     assert.ok(CAM_RADIUS > 2.4 && CAM_RADIUS < 3.6);
+  });
+
+  it('chopping-block stump is stockier than tall (top < bot, height ~ half diameter)', () => {
+    assert.ok(STUMP_TOP_RADIUS < STUMP_BOT_RADIUS, 'top should taper in vs bottom');
+    assert.ok(STUMP_BOT_RADIUS - STUMP_TOP_RADIUS >= 0.04);
+    const avgD = STUMP_TOP_RADIUS + STUMP_BOT_RADIUS;
+    // height / avg diameter roughly ≤ 0.55 (stocky chopping block, not a post).
+    assert.ok(STUMP_HEIGHT / avgD <= 0.55, `expected stocky H/D, got ${STUMP_HEIGHT / avgD}`);
+    assert.ok(STUMP_HEIGHT >= 0.28 && STUMP_HEIGHT <= 0.4);
   });
 
   it('sampleLogRound matches reference inch ranges (4.5–8 r, 12–16 h)', () => {

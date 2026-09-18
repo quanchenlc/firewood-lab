@@ -192,7 +192,7 @@ export interface PlantedStump {
   root: THREE.Object3D;
   /** World Y of the flat chopping face. */
   topY: number;
-  /** Approximate top radius for physics / pad sizing. */
+  /** Approximate top radius for physics / yard layout. */
   topRadius: number;
   /** Visual stump height after planting. */
   height: number;
@@ -213,24 +213,32 @@ export async function buildChoppingBlock(
     loadTexture(STUMP_TEX.nor).catch(() => null),
     loadTexture(STUMP_TEX.arm).catch(() => null),
   ]);
-  // Bark wraps the cylinder side; tighten repeat so rings read as trunk bark.
+  // Bark wraps once around the side — lower repeat reduces tiled / plastic look.
   diff.wrapS = diff.wrapT = THREE.RepeatWrapping;
-  diff.repeat.set(1.15, 0.85);
+  diff.repeat.set(0.92, 0.72);
+  diff.offset.set(0.08, 0.12);
   if (nor) {
     nor.wrapS = nor.wrapT = THREE.RepeatWrapping;
     nor.repeat.copy(diff.repeat);
+    nor.offset.copy(diff.offset);
   }
   if (arm) {
+    // Poly Haven ARM: G=roughness. Keep wrap/offset matched to albedo.
     arm.wrapS = arm.wrapT = THREE.RepeatWrapping;
     arm.repeat.copy(diff.repeat);
+    arm.offset.copy(diff.offset);
   }
 
   const barkMat = new THREE.MeshStandardMaterial({
     map: diff,
     normalMap: nor ?? undefined,
+    // Soften bump so daylight doesn't read as shiny plastic bark.
+    normalScale: nor ? new THREE.Vector2(0.45, 0.45) : undefined,
     roughnessMap: arm ?? undefined,
-    roughness: arm ? 1 : 0.9,
+    roughness: 1,
     metalness: 0,
+    // Slight warm albedo pull — dry outdoor stump, not grey plastic.
+    color: 0xf0e6d8,
   });
   // Flat sawn face — end-grain rings so the chopping face reads clearly.
   const endMap = await loadTexture('assets/endgrain/toona.png', THREE.SRGBColorSpace).catch(
@@ -242,8 +250,9 @@ export async function buildChoppingBlock(
   }
   const cutMat = new THREE.MeshStandardMaterial({
     map: endMap ?? undefined,
-    color: endMap ? 0xffffff : 0xc9a978,
-    roughness: 0.88,
+    // Warm sandy end-grain (not pure white → less plastic specular).
+    color: endMap ? 0xf2e4cc : 0xc9a978,
+    roughness: 0.96,
     metalness: 0,
   });
 
@@ -253,23 +262,33 @@ export async function buildChoppingBlock(
   const BOT_R = STUMP_BOT_RADIUS;
   const HEIGHT = STUMP_HEIGHT;
   const stumpSeed = 41;
+  // Shared amp so cylinder top rim and cut-face disk stay outline-coherent.
+  const stumpAmpIn = 0.34;
 
   const root = new THREE.Group();
   root.name = 'chopping-block';
 
-  const bodyGeo = new THREE.CylinderGeometry(TOP_R, BOT_R, HEIGHT, 32, 4);
-  applyStumpOutlineIrregularity(bodyGeo, { height: HEIGHT, seed: stumpSeed });
+  // Open-ended cylinder: no bark-textured caps (caps looked like a plastic rim /
+  // muddy disk). Flat end-grain CircleGeometry is the only top face.
+  const bodyGeo = new THREE.CylinderGeometry(TOP_R, BOT_R, HEIGHT, 40, 5, true);
+  applyStumpOutlineIrregularity(bodyGeo, {
+    height: HEIGHT,
+    seed: stumpSeed,
+    ampIn: stumpAmpIn,
+  });
   const body = new THREE.Mesh(bodyGeo, barkMat);
   body.position.y = HEIGHT * 0.5;
   body.castShadow = true;
   body.receiveShadow = true;
   root.add(body);
 
-  const topGeo = new THREE.CircleGeometry(TOP_R * 0.995, 40);
+  // Same radius + seed + amp as the body top — no torus rim / plastic hoop.
+  // Slight oversize so bark mantle edge never peeks as a false rim.
+  const topGeo = new THREE.CircleGeometry(TOP_R * 1.01, 48);
   applyStumpOutlineIrregularity(topGeo, {
     height: HEIGHT,
     seed: stumpSeed,
-    ampIn: 0.32,
+    ampIn: stumpAmpIn,
     plane: 'xy',
   });
   const top = new THREE.Mesh(topGeo, cutMat);
@@ -277,15 +296,6 @@ export async function buildChoppingBlock(
   top.position.y = HEIGHT + 0.001;
   top.receiveShadow = true;
   root.add(top);
-
-  // Thin rim bevel so the cut edge reads in daylight.
-  const rim = new THREE.Mesh(
-    new THREE.TorusGeometry(TOP_R * 0.97, 0.012, 6, 36),
-    new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.95, metalness: 0 }),
-  );
-  rim.rotation.x = Math.PI / 2;
-  rim.position.y = HEIGHT;
-  root.add(rim);
 
   const topY = HEIGHT;
   return { root, topY, topRadius: TOP_R, height: HEIGHT };

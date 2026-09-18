@@ -45,10 +45,14 @@ export const LOG_RADIUS_BOT = ((LOG_RADIUS_IN_MIN + LOG_RADIUS_IN_MAX) / 2) * IN
 /** Mild taper so end-grain reads slightly narrower than the base (beyond equal-r ref). */
 export const LOG_RADIUS_TOP = LOG_RADIUS_BOT * 0.92;
 
-/** Flat-top chopping block under the round (slightly wider than max log). */
-export const STUMP_TOP_RADIUS = 0.32;
-export const STUMP_BOT_RADIUS = 0.36;
-export const STUMP_HEIGHT = 0.42;
+/**
+ * Flat-top chopping block under the round (slightly wider than max log).
+ * Stockier silhouette: height ≈ half average diameter, top a bit narrower than bottom
+ * (feel toward a real chopping stump — not 1:1 with any proprietary ref mesh).
+ */
+export const STUMP_TOP_RADIUS = 0.34;
+export const STUMP_BOT_RADIUS = 0.4;
+export const STUMP_HEIGHT = 0.34;
 
 /** Orbit look-at Y ≈ stump top + half default log height. */
 export const CAM_LOOK_AT_Y = STUMP_HEIGHT + LOG_HEIGHT * 0.5;

@@ -836,6 +836,23 @@ async function boot(): Promise<void> {
       return out;
     },
     /** Debug: hide decorative InstancedMesh yard debris (screenshot clarity). */
+    /** Debug: chopping-block child meshes (expect body + top disk only). */
+    dumpChoppingBlock: () => {
+      const out: Array<{ name: string; geo: string; y: number }> = [];
+      logScene.scene.traverse((obj) => {
+        if (obj.name !== 'chopping-block') return;
+        obj.traverse((child) => {
+          const mesh = child as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          out.push({
+            name: mesh.name || '(mesh)',
+            geo: (mesh.geometry as THREE.BufferGeometry)?.type ?? '?',
+            y: +mesh.position.y.toFixed(3),
+          });
+        });
+      });
+      return out;
+    },
     hideYardDebris: () => {
       let n = 0;
       logScene.scene.traverse((obj) => {
@@ -846,7 +863,7 @@ async function boot(): Promise<void> {
       });
       return n;
     },
-    /** Debug: world pose of each fragment (radial = hypot(x,z); stump top R≈0.32). */
+    /** Debug: world pose of each fragment (radial = hypot(x,z); stump top R≈0.34). */
     fragmentPoses: () =>
       logScene.fracture.fragments.map((f) => {
         const x = f.body.position.x;
