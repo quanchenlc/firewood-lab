@@ -744,6 +744,44 @@ async function boot(): Promise<void> {
     splittableCount: () => logScene.fracture.fragments.filter((f) => f.splittable).length,
     firewoodCount: () => logScene.fracture.fragments.filter((f) => !f.onStump).length,
     stumpCount: () => logScene.fracture.fragments.filter((f) => f.onStump).length,
+    /**
+     * Debug: world AABB min.y for settled firewood chips (tip-drop / ring).
+     * After AABB settle, values should sit near YARD_GROUND_Y + ~1.5mm (~0–0.01).
+     */
+    firewoodGroundGaps: () => {
+      const out: Array<{
+        minY: number;
+        bodyY: number;
+        tipDrop: boolean;
+        recycle: boolean;
+        radial: number;
+      }> = [];
+      const box = new THREE.Box3();
+      for (const f of logScene.fracture.fragments) {
+        if (f.onStump || !f.mesh.visible) continue;
+        f.mesh.updateMatrixWorld(true);
+        box.setFromObject(f.mesh);
+        out.push({
+          minY: +box.min.y.toFixed(4),
+          bodyY: +f.body.position.y.toFixed(4),
+          tipDrop: !!f.tipDrop,
+          recycle: !!f.recycle,
+          radial: +Math.hypot(f.body.position.x, f.body.position.z).toFixed(3),
+        });
+      }
+      return out;
+    },
+    /** Debug: hide decorative InstancedMesh yard debris (screenshot clarity). */
+    hideYardDebris: () => {
+      let n = 0;
+      logScene.scene.traverse((obj) => {
+        if ((obj as THREE.InstancedMesh).isInstancedMesh) {
+          obj.visible = false;
+          n += 1;
+        }
+      });
+      return n;
+    },
     /** Debug: world pose of each fragment (radial = hypot(x,z); stump top R≈0.32). */
     fragmentPoses: () =>
       logScene.fracture.fragments.map((f) => {
