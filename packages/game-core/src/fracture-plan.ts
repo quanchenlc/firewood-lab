@@ -78,7 +78,7 @@ export const TIP_DROP_YAW_JIT_DEG = 8;
 export const TIP_DROP_ARC_HEIGHT = 0.028;
 /**
  * Rest radial band beside the stump (metres from origin).
- * Stump visual R≈0.32 / collider ≥0.35 — keep chips clear of the top face
+ * Stump visual R≈0.34 / collider ≥0.35 — keep chips clear of the top face
  * and far enough that a tipped AABB does not re-intersect the cylinder.
  */
 export const TIP_DROP_REST_RADIAL = 0.66;
@@ -353,7 +353,7 @@ export function ringPileSimToWorldAxes(input: {
  * Plan neat annular slots for finished firewood around the stump.
  * Packs pieces tightly along the reference arc by half-width (not sparse even
  * angular spacing); overflow → outer tier (larger radius).
- * Never places inside the stump footprint (radius ≫ stump ~0.32).
+ * Never places inside the stump footprint (radius ≫ stump ~0.34).
  */
 export function planRingPileSlots(
   count: number,

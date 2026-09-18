@@ -846,7 +846,7 @@ async function boot(): Promise<void> {
       });
       return n;
     },
-    /** Debug: world pose of each fragment (radial = hypot(x,z); stump top R≈0.32). */
+    /** Debug: world pose of each fragment (radial = hypot(x,z); stump top R≈0.34). */
     fragmentPoses: () =>
       logScene.fracture.fragments.map((f) => {
         const x = f.body.position.x;

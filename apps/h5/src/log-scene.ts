@@ -18,7 +18,6 @@ import {
   CAM_LOOK_AT_Y,
   CAM_RADIUS,
   applyBarkIrregularity,
-  applyStumpOutlineIrregularity,
   camLookAtY,
   sampleLogRound,
   type LogRoundDims,
@@ -250,8 +249,8 @@ export function createLogScene(
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  // Daytime outdoor feel (screen.toys/firewood airy look).
-  renderer.toneMappingExposure = weak ? 1.45 : 1.62;
+  // Daytime outdoor feel — slight warm lift only (no proprietary color grade).
+  renderer.toneMappingExposure = weak ? 1.48 : 1.66;
 
   const scene = new THREE.Scene();
   // Soft daylight haze — pushed out so the equirect sky stays readable.
@@ -269,8 +268,8 @@ export function createLogScene(
   let roundDims: LogRoundDims = sampleLogRound();
 
   // Bright hemisphere: warm sky + greenish ground bounce.
-  scene.add(new THREE.HemisphereLight(0xfff8ee, 0x7f9a62, weak ? 1.45 : 1.75));
-  const key = new THREE.DirectionalLight(0xfff3dc, weak ? 2.15 : 2.65);
+  scene.add(new THREE.HemisphereLight(0xfff4e4, 0x7f9a62, weak ? 1.45 : 1.75));
+  const key = new THREE.DirectionalLight(0xffefd4, weak ? 2.15 : 2.65);
   key.position.set(3.6, 6.8, 2.6);
   scene.add(key);
   const fill = new THREE.DirectionalLight(0xc2daf5, weak ? 0.7 : 0.95);
@@ -323,6 +322,7 @@ export function createLogScene(
   addYardDebris(scene, { weak });
 
   // Hierarchy: ground → stump chopping block (flat cut top) → upright round on face.
+  // Stump sits directly on the yard texture (no packed-earth pad blob).
   const planted = choppingBlock;
   const stump = planted.root;
   scene.add(stump);
@@ -330,29 +330,6 @@ export function createLogScene(
   const stumpTopY = planted.topY;
   let logCenterY = stumpTopY + roundDims.height * 0.5 + 0.002;
   lookAt.y = camLookAtY(roundDims, stumpTopY);
-
-  // Thin packed-earth pad under the stump — match organic outline (not a clean disk).
-  const padGeo = new THREE.CircleGeometry(
-    Math.max(planted.topRadius * 1.25, planted.topRadius + 0.08),
-    48,
-  );
-  applyStumpOutlineIrregularity(padGeo, {
-    height: STUMP_BOT_RADIUS,
-    seed: 23,
-    ampIn: 0.35,
-    plane: 'xy',
-  });
-  const pad = new THREE.Mesh(
-    padGeo,
-    new THREE.MeshStandardMaterial({
-      color: 0x8a6f52,
-      roughness: 1,
-      metalness: 0,
-    }),
-  );
-  pad.rotation.x = -Math.PI / 2;
-  pad.position.y = 0.004;
-  scene.add(pad);
 
   let mats: SpeciesMaterials | null = null;
   let logMesh = createLogProxy(false);
