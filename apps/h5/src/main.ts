@@ -835,6 +835,67 @@ async function boot(): Promise<void> {
       }
       return out;
     },
+    /** Debug: shadowMap + cast/receive flags for contact-shadow verification. */
+    shadowProbe: () => {
+      const r = logScene.renderer;
+      let groundReceive = false;
+      let stumpCast = false;
+      let logCast = false;
+      let keyCast = false;
+      let shadowMapW = 0;
+      let shadowMapAllocated = false;
+      logScene.scene.traverse((obj) => {
+        const light = obj as THREE.DirectionalLight;
+        if (light.isDirectionalLight && light.castShadow) {
+          keyCast = true;
+          shadowMapW = light.shadow.mapSize.x;
+          shadowMapAllocated = !!light.shadow.map;
+        }
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        if (mesh.geometry?.type === 'CircleGeometry' && mesh.receiveShadow) groundReceive = true;
+        if (mesh.name === 'chopping-block-body') stumpCast = !!mesh.castShadow;
+        if (mesh.userData?.role === 'log') logCast = !!mesh.castShadow;
+      });
+      // Log proxy may be DestructibleMesh without userData yet on first probe — fall back.
+      if (!logCast && logScene.logMesh) logCast = !!logScene.logMesh.castShadow;
+      return {
+        shadowMapEnabled: r.shadowMap.enabled,
+        shadowMapType: r.shadowMap.type,
+        keyCast,
+        shadowMapW,
+        shadowMapAllocated,
+        groundReceive,
+        stumpCast,
+        logCast,
+        fragmentCast: logScene.fracture.fragments.filter((f) => f.mesh.castShadow).length,
+        fragmentTotal: logScene.fracture.fragments.length,
+      };
+    },
+    /**
+     * Debug: flatten lighting + ground albedo so cast shadows are unmistakable
+     * in screenshots (does not change production defaults).
+     */
+    debugMakeShadowsObvious: () => {
+      logScene.scene.traverse((obj) => {
+        const hemi = obj as THREE.HemisphereLight;
+        if (hemi.isHemisphereLight) hemi.intensity = 0.15;
+        const dir = obj as THREE.DirectionalLight;
+        if (dir.isDirectionalLight && !dir.castShadow) dir.intensity = 0.05;
+        if (dir.isDirectionalLight && dir.castShadow) dir.intensity = 2.4;
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        if (mesh.geometry?.type === 'CircleGeometry') {
+          const mat = mesh.material as THREE.MeshStandardMaterial;
+          if (mat?.isMeshStandardMaterial) {
+            mat.map = null;
+            mat.normalMap = null;
+            mat.color.setHex(0xd8c9a8);
+            mat.needsUpdate = true;
+          }
+        }
+      });
+    },
     /** Debug: hide decorative InstancedMesh yard debris (screenshot clarity). */
     /** Debug: chopping-block child meshes (expect one closed CylinderGeometry). */
     dumpChoppingBlock: () => {
