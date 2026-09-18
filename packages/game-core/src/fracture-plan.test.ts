@@ -19,6 +19,9 @@ import {
   RING_PILE_RADIUS,
   RING_PILE_START_ANGLE,
   RING_PILE_TIER_DEPTH,
+  RING_PILE_SLOT_WIDTH,
+  RING_PILE_MAX_STACK_H,
+  RING_PILE_RADIAL_JIT,
   TIP_DROP_ANGLE_DEG,
   TIP_DROP_ARC_HEIGHT,
   TIP_DROP_DURATION_MS,
@@ -37,6 +40,7 @@ import {
   normalizePushXZ,
   planFracture,
   planRingPileSlots,
+  pickRingPileNextSlot,
   sampleTipDropPose,
   settlePositionY,
   shouldTossOnTooThin,
@@ -463,14 +467,17 @@ describe('settlePositionY (AABB-min ground settle)', () => {
 });
 
 describe('planRingPileSlots (reference FirewoodPile arc)', () => {
-  it('matches reference radius / arc constants (60×ld, 320°, 230°)', () => {
+  it('matches reference radius / arc / XC / stack-H constants', () => {
     assert.ok(Math.abs(RING_PILE_RADIUS - 60 * INCH) < 1e-12);
     assert.ok(Math.abs(RING_PILE_START_ANGLE - (320 * Math.PI) / 180) < 1e-12);
     assert.ok(Math.abs(RING_PILE_ARC_SPAN - (230 * Math.PI) / 180) < 1e-12);
     assert.ok(Math.abs(RING_PILE_TIER_DEPTH - 18 * INCH) < 1e-12);
+    assert.ok(Math.abs(RING_PILE_SLOT_WIDTH - 5 * INCH) < 1e-12);
+    assert.ok(Math.abs(RING_PILE_MAX_STACK_H - 18 * INCH) < 1e-12);
+    assert.ok(Math.abs(RING_PILE_RADIAL_JIT - 1 * INCH) < 1e-12);
   });
 
-  it('places a neat annular band clear of the stump top', () => {
+  it('packs a tight crescent from arc start (not sparse 230° beads)', () => {
     const halves = Array.from({ length: 10 }, () => 0.05);
     const rnds = Array.from({ length: 20 }, () => 0.5);
     const slots = planRingPileSlots(10, { halfHeights: halves, halfWidths: halves, rnds });
@@ -482,30 +489,45 @@ describe('planRingPileSlots (reference FirewoodPile arc)', () => {
     const maxR = Math.max(...radii);
     assert.ok(minR > stumpR + 0.5, `ring must clear stump, minR=${minR}`);
     // Tight annular band (not a messy scatter).
-    assert.ok(maxR - minR < 0.15, `expected neat band, spread=${maxR - minR}`);
+    assert.ok(maxR - minR < 0.12, `expected neat band, spread=${maxR - minR}`);
 
-    // Packed along arc — consecutive angular gaps roughly match piece width / R.
+    // Compact crescent: angular span ≪ full arcSpan (≈4.01 rad).
     const angs = slots.map((s) => s.yaw);
-    for (let i = 1; i < angs.length; i++) {
-      const gap = angs[i]! - angs[i - 1]!;
-      assert.ok(gap > 0.04 && gap < 0.12, `packed gap=${gap}`);
+    const angSpan = Math.max(...angs) - Math.min(...angs);
+    assert.ok(angSpan < 0.9, `crescent should be tight, angSpan=${angSpan}`);
+    assert.ok(angSpan > 0.05, `expected some arc extent, angSpan=${angSpan}`);
+
+    // Ground-level neighbors sit ~XC apart along the arc.
+    const ground = slots.filter((s) => s.slotGridY === 0).sort((a, b) => b.slotX - a.slotX);
+    assert.ok(ground.length >= 2, 'expected multiple ground slots');
+    for (let i = 1; i < ground.length; i++) {
+      const dSlot = Math.abs(ground[i]!.slotX - ground[i - 1]!.slotX);
+      assert.ok(Math.abs(dSlot - 1) < 1e-9, `ground slot step=${dSlot}`);
     }
 
-    // No piece on stump top (y is ground-level half-thickness).
+    // Prefer stacking: with ≥3 pieces, at least one rides on neighbors.
+    assert.ok(
+      slots.some((s) => s.slotGridY >= 1),
+      'expected stacked layer (slotGridY≥1)',
+    );
+
+    // Stays a ground pile (under max stack H), never on stump top (~0.5m+).
     for (const s of slots) {
-      assert.ok(s.y < 0.2, `y=${s.y} looks like stump height`);
-      assert.ok(s.y > 0.04);
+      assert.ok(s.y < RING_PILE_MAX_STACK_H, `y=${s.y} exceeds max stack`);
+      assert.ok(s.y > 0.02);
       assert.equal(s.tier, 0);
     }
+    const groundYMax = Math.max(...slots.filter((s) => s.slotGridY === 0).map((s) => s.y));
+    assert.ok(groundYMax < 0.12, `ground layer should sit low, maxY=${groundYMax}`);
   });
 
   it('overflow spills to outer tier (larger radius)', () => {
-    // Narrow arc + wide pieces → forces a second tier quickly.
-    const n = 8;
+    // Tiny arc capacity forces `_needsTierAdvance` after a few ground slots.
+    const n = 12;
     const slots = planRingPileSlots(n, {
-      arcSpan: 0.6,
-      halfHeights: Array.from({ length: n }, () => 0.06),
-      halfWidths: Array.from({ length: n }, () => 0.08),
+      arcSpan: 0.2,
+      halfHeights: Array.from({ length: n }, () => 0.05),
+      halfWidths: Array.from({ length: n }, () => 0.05),
       rnds: Array.from({ length: n * 2 }, () => 0.5),
     });
     const tier0 = slots.filter((s) => s.tier === 0);
@@ -537,6 +559,17 @@ describe('planRingPileSlots (reference FirewoodPile arc)', () => {
     }
     assert.equal(slots[0]!.isXThinner, false);
     assert.equal(slots[1]!.isXThinner, true);
+  });
+
+  it('pickRingPileNextSlot stacks on adjacent pairs before extending far', () => {
+    const filled = new Set<string>(['0.0,0', '-1.0,0']);
+    const tops = new Map<string, number>([
+      ['0.0,0', 0.1],
+      ['-1.0,0', 0.1],
+    ]);
+    const next = pickRingPileNextSlot(filled, tops, -1);
+    assert.equal(next.x, -0.5);
+    assert.equal(next.y, 1);
   });
 });
 

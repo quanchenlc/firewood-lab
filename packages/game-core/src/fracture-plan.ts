@@ -121,24 +121,30 @@ export function settlePositionY(
  *
  *   radius          = 60 * ld ≈ 1.524 m
  *   startAngle      = 320°
- *   arcSpan         = 230°  (crescent → reads as annular pile around stump)
+ *   arcSpan         = 230°  (capacity before outer tier — NOT even spacing)
  *   tierDepthSpacing = 18 * ld ≈ 0.457 m
- *   slot width XC   = 5 * ld
- *   ground pad      ≈ half-thickness + small lift (no pieces on stump top)
+ *   slot width XC   = 5 * ld  (discrete grid; pieces pack side-by-side)
+ *   max stack H     = 18 * ld (prefer stacking up before extending the arc)
+ *   radial jit      = ±1 * ld
+ *
+ * Reference packs from the start of the arc with `_getValidSlots` (extend
+ * left / stack on adjacent pairs) — a tight crescent, not a sparse 230° bead.
  */
 export const RING_PILE_RADIUS = 60 * INCH;
 export const RING_PILE_START_ANGLE = (320 * Math.PI) / 180;
 export const RING_PILE_ARC_SPAN = (230 * Math.PI) / 180;
 export const RING_PILE_TIER_DEPTH = 18 * INCH;
 export const RING_PILE_SLOT_WIDTH = 5 * INCH;
-/** Extra radial jitter (±) so the ring isn't a perfect bead necklace. */
-export const RING_PILE_RADIAL_JIT = 2 * INCH;
-/** Max pieces per arc tier before spilling to next outer tier. */
+/** Extra radial jitter (±) — reference `_simToWorld` uses ±1×ld. */
+export const RING_PILE_RADIAL_JIT = 1 * INCH;
+/** Soft cap before `_advanceTier` (reference also gates stack height). */
+export const RING_PILE_MAX_STACK_H = 18 * INCH;
+/** Legacy alias — arc capacity is `arcSpan * radius`, not a fixed count. */
 export const RING_PILE_MAX_PER_TIER = 14;
 /** Ground clearance pad above half-thickness (metres). */
-export const RING_PILE_GROUND_PAD = 0.015;
-/** Soft roll jitter (±radians) while lying in the pile. */
-export const RING_PILE_ROLL_JIT = 0.12;
+export const RING_PILE_GROUND_PAD = 0.008;
+/** Soft roll jitter (±radians) — reference physics spawn uses ~±0.08. */
+export const RING_PILE_ROLL_JIT = 0.05;
 /** Recycle slide duration (ms). */
 export const RING_PILE_RECYCLE_MS = 520;
 export const RING_PILE_RECYCLE_JIT_MS = 180;
@@ -160,6 +166,10 @@ export interface RingPileSlot {
   roll: number;
   /** True when local cross-section X < Z (reference `_getCrossSection2D`). */
   isXThinner: boolean;
+  /** Discrete sim-grid X (units of XC); 0 at arc start, negative as pile grows. */
+  slotX: number;
+  /** Discrete stack level (0 = ground). */
+  slotGridY: number;
   /**
    * Orientation basis matching reference `_simToWorld` (piece lying on side):
    * column0 / column1 / column2 as XYZ unit axes of the local frame.
@@ -350,9 +360,41 @@ export function ringPileSimToWorldAxes(input: {
 }
 
 /**
- * Plan neat annular slots for finished firewood around the stump.
- * Packs pieces tightly along the reference arc by half-width (not sparse even
- * angular spacing); overflow → outer tier (larger radius).
+ * Pick next discrete slot like reference FirewoodPile `_getValidSlots`:
+ * prefer stacking on adjacent ground pairs, else extend the arc leftward.
+ */
+export function pickRingPileNextSlot(
+  filledSlots: Set<string>,
+  slotTops: Map<string, number>,
+  minGx: number,
+  maxStackH: number = RING_PILE_MAX_STACK_H,
+): { x: number; y: number } {
+  if (filledSlots.size === 0) return { x: 0, y: 0 };
+  const candidates: Array<{ x: number; y: number }> = [{ x: minGx - 1, y: 0 }];
+  for (const key of filledSlots) {
+    const parts = key.split(',');
+    const r = parseFloat(parts[0]!);
+    const gy = parseInt(parts[1]!, 10);
+    const leftKey = `${(r - 1).toFixed(1)},${gy}`;
+    if (!filledSlots.has(leftKey)) continue;
+    const midX = r - 0.5;
+    const upY = gy + 1;
+    const upKey = `${midX.toFixed(1)},${upY}`;
+    if (filledSlots.has(upKey)) continue;
+    const topA = slotTops.get(`${r.toFixed(1)},${gy}`) ?? 0;
+    const topB = slotTops.get(leftKey) ?? 0;
+    if (Math.max(topA, topB) < maxStackH) {
+      candidates.push({ x: midX, y: upY });
+    }
+  }
+  candidates.sort((a, b) => b.y - a.y || Math.abs(a.x) - Math.abs(b.x));
+  return candidates[0]!;
+}
+
+/**
+ * Plan neat crescent/annulus slots for finished firewood around the stump.
+ * Mirrors reference FirewoodPile slot grid (XC units) + `_simToWorld` mapping:
+ * pack side-by-side from arc start, stack up on adjacent pairs, overflow → outer tier.
  * Never places inside the stump footprint (radius ≫ stump ~0.34).
  */
 export function planRingPileSlots(
@@ -363,10 +405,12 @@ export function planRingPileSlots(
     arcSpan?: number;
     tierDepth?: number;
     maxPerTier?: number;
+    maxStackH?: number;
+    slotWidth?: number;
     groundYBase?: number;
     /** Per-piece half-thickness (metres) for ground Y; defaults to 0.05. */
     halfHeights?: number[];
-    /** Approximate half-width along the arc (metres); defaults to halfHeights. */
+    /** Approximate half-width along the arc (metres); unused for XC grid (kept for API). */
     halfWidths?: number[];
     /** Local AABB sizes for `_simToWorld` thin-axis / grain (metres). */
     sizeXs?: number[];
@@ -384,42 +428,72 @@ export function planRingPileSlots(
   const start = opts?.startAngle ?? RING_PILE_START_ANGLE;
   const span = opts?.arcSpan ?? RING_PILE_ARC_SPAN;
   const tierDepth = opts?.tierDepth ?? RING_PILE_TIER_DEPTH;
+  const xc = opts?.slotWidth ?? RING_PILE_SLOT_WIDTH;
+  const maxStackH = opts?.maxStackH ?? RING_PILE_MAX_STACK_H;
   const groundBase = opts?.groundYBase ?? 0;
   const slots: RingPileSlot[] = [];
 
-  // Greedy pack along arc by width — reference slot grid keeps chips touching.
+  const filledSlots = new Set<string>();
+  const slotTops = new Map<string, number>();
+  let minGx = 1;
+  let maxGx = -1;
   let tier = 0;
-  let cursor = 0; // arc-length along current tier
+
+  const resetTierGrid = (): void => {
+    filledSlots.clear();
+    slotTops.clear();
+    minGx = 1;
+    maxGx = -1;
+  };
 
   for (let i = 0; i < n; i++) {
-    const halfH = opts?.halfHeights?.[i] ?? 0.05;
-    const halfW = Math.max(0.04, opts?.halfWidths?.[i] ?? halfH * 1.15);
-    const step = halfW * 2 * 1.08; // slight contact gap
+    const sizeX = opts?.sizeXs?.[i] ?? (opts?.halfWidths?.[i] ?? 0.06) * 2;
+    const sizeY = opts?.sizeYs?.[i] ?? (opts?.halfHeights?.[i] ?? 0.05) * 4;
+    const sizeZ = opts?.sizeZs?.[i] ?? (opts?.halfWidths?.[i] ?? 0.06) * 2;
+    // Reference T = min(size.x, size.z) — thin cross-section → world-up thickness.
+    const T = Math.max(
+      0.04,
+      opts?.halfHeights?.[i] != null
+        ? opts.halfHeights[i]! * 2
+        : Math.min(sizeX, sizeZ),
+    );
+
+    let slot = pickRingPileNextSlot(filledSlots, slotTops, minGx, maxStackH);
     const rad = baseR + tier * tierDepth;
     const maxArc = span * rad;
-
-    if (cursor + step > maxArc && cursor > 0) {
+    // Arc capacity exceeded → outer tier (reference `_needsTierAdvance`).
+    if (filledSlots.size > 0 && Math.abs(slot.x * xc) >= maxArc) {
       tier += 1;
-      cursor = 0;
+      resetTierGrid();
+      slot = pickRingPileNextSlot(filledSlots, slotTops, minGx, maxStackH);
     }
+
+    let physicalBaseY = 0;
+    if (slot.y > 0) {
+      const leftTop = slotTops.get(`${(slot.x - 0.5).toFixed(1)},${slot.y - 1}`) ?? 0;
+      const rightTop = slotTops.get(`${(slot.x + 0.5).toFixed(1)},${slot.y - 1}`) ?? 0;
+      physicalBaseY = Math.max(leftTop, rightTop);
+    }
+
+    const key = `${slot.x.toFixed(1)},${slot.y}`;
+    filledSlots.add(key);
+    slotTops.set(key, physicalBaseY + T);
+    maxGx = Math.max(maxGx, slot.x);
+    minGx = Math.min(minGx, slot.x);
 
     const rndA = opts?.rnds?.[i * 2] ?? 0.5;
     const rndB = opts?.rnds?.[i * 2 + 1] ?? 0.5;
     const radJit = (rndA - 0.5) * 2 * RING_PILE_RADIAL_JIT;
-    const r = baseR + tier * tierDepth + radJit;
-    const ang = start + (cursor + halfW) / Math.max(1e-6, r);
-    cursor += step;
-
+    const tierR = baseR + tier * tierDepth;
+    const simX = slot.x * xc;
+    // Reference: angle = startAngle + simX / (radius + tierDepth)
+    const ang = start + simX / Math.max(1e-6, tierR);
+    const r = tierR + radJit;
     const ox = Math.cos(ang);
     const oz = Math.sin(ang);
-    // Mild stacking: every 3rd chip rides slightly on neighbors.
-    const stackLift = (i % 3 === 2 ? halfH * 0.9 : 0) + tier * 0.02;
-    const y = groundBase + halfH + RING_PILE_GROUND_PAD + stackLift;
+    const y = groundBase + physicalBaseY + T * 0.5 + RING_PILE_GROUND_PAD;
     const roll = (rndB - 0.5) * 2 * RING_PILE_ROLL_JIT;
 
-    const sizeX = opts?.sizeXs?.[i] ?? halfW * 2;
-    const sizeY = opts?.sizeYs?.[i] ?? halfH * 4; // grain defaults longer than cross-section
-    const sizeZ = opts?.sizeZs?.[i] ?? halfW * 2;
     const orient = ringPileSimToWorldAxes({
       angle: ang,
       roll,
@@ -437,6 +511,8 @@ export function planRingPileSlots(
       tier,
       roll,
       isXThinner: orient.isXThinner,
+      slotX: slot.x,
+      slotGridY: slot.y,
       axisX: orient.axisX,
       axisY: orient.axisY,
       axisZ: orient.axisZ,

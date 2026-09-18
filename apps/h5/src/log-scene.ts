@@ -479,7 +479,7 @@ export function createLogScene(
 
   function scatterAndRecycle(): void {
     fracture.scatterToGround();
-    // Let tip-drop finish, then pull into the annular ring pile (ref radius ≈ 60×ld).
+    // Tip-drop near stump first (mid-round feel); then pack into XC-grid crescent.
     window.setTimeout(() => {
       fracture.recycleToRing({ groundY: 0 });
     }, 720);
