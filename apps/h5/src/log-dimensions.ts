@@ -192,6 +192,10 @@ export function applyBarkIrregularity(
  * Same organic outline for the chopping-block cylinder / cut-face disk.
  * - Cylinder (Y-up): radial = hypot(x,z)
  * - CircleGeometry (XY plane, later rotated flat): radial = hypot(x,y)
+ *
+ * Additive bark must NOT be divided by near-axis radial (cap interiors) —
+ * that explodes top/bottom disks into a giant ground-plane pancake.
+ * Fade bark by edgeFactor = radial / refRadius so only the outer silhouette moves.
  */
 export function applyStumpOutlineIrregularity(
   geo: {
@@ -211,6 +215,10 @@ export function applyStumpOutlineIrregularity(
     ampIn?: number;
     /** 'xz' for Y-up cylinder; 'xy' for flat CircleGeometry before tilt. */
     plane?: 'xz' | 'xy';
+    /** Nominal outer radius (or top/bot for a taper) — required for safe caps. */
+    refRadius?: number;
+    refRadiusTop?: number;
+    refRadiusBot?: number;
   },
 ): void {
   const pos = geo.getAttribute('position');
@@ -219,6 +227,8 @@ export function applyStumpOutlineIrregularity(
   const ampIn = opts.ampIn ?? BARK_AMP_IN * 0.85;
   const h = Math.max(1e-6, opts.height);
   const plane = opts.plane ?? 'xz';
+  const rTop = opts.refRadiusTop ?? opts.refRadius;
+  const rBot = opts.refRadiusBot ?? opts.refRadius;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const y = pos.getY(i);
@@ -230,7 +240,14 @@ export function applyStumpOutlineIrregularity(
       plane === 'xy' ? 1 : Math.max(0, Math.min(1, (y + h * 0.5) / h));
     const plan = planSilhouetteScale(angle, seed + 9);
     const bark = radialBarkOffsetMetres(angle, heightFrac, seed, ampIn);
-    const scale = (radial * plan + bark) / radial;
+    // Nominal mantle radius at this height (taper-aware).
+    const refR =
+      rTop != null && rBot != null
+        ? rBot + (rTop - rBot) * heightFrac
+        : (opts.refRadius ?? radial);
+    const edge = Math.min(1, radial / Math.max(refR * 0.85, 1e-6));
+    const targetR = radial * plan + bark * edge;
+    const scale = targetR / radial;
     if (plane === 'xy') {
       pos.setXYZ(i, x * scale, y * scale, z);
     } else {
