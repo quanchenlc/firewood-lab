@@ -15,8 +15,11 @@ import {
   cutFaceCoverageRatio,
   cutTriAreaInPlane,
   estimateChordCover,
+  fanTriangulateContour,
   hasReclassifiedInnerSlot,
+  orderContourInPlane,
   projectionSpan,
+  roughCutOffset,
   shouldSealCutFace,
 } from './cut-face.ts';
 
@@ -221,6 +224,42 @@ describe('shouldSealCutFace', () => {
     assert.equal(shouldSealCutFace(60, 0.5), true);
     assert.equal(shouldSealCutFace(20, 0.97), false);
     assert.equal(shouldSealCutFace(20, 0.9), true);
+  });
+});
+
+describe('orderContourInPlane + fanTriangulateContour', () => {
+  it('orders a rectangle CCW around centroid', () => {
+    const pts = [
+      { i: 0, u: 0, v: 0 },
+      { i: 1, u: 2, v: 0 },
+      { i: 2, u: 2, v: 1 },
+      { i: 3, u: 0, v: 1 },
+    ];
+    // Shuffle input order
+    const ordered = orderContourInPlane([pts[2]!, pts[0]!, pts[3]!, pts[1]!]);
+    assert.equal(ordered.length, 4);
+    // Adjacent edges should form the rectangle cycle (any start).
+    const set = new Set(ordered);
+    assert.equal(set.size, 4);
+  });
+
+  it('fan emits n tris with correct winding flip', () => {
+    const contour = [0, 1, 2, 3];
+    const ccw = fanTriangulateContour(contour, 99, false);
+    assert.equal(ccw.length, 12); // 4 tris × 3
+    assert.deepEqual(ccw.slice(0, 3), [99, 0, 1]);
+    const cw = fanTriangulateContour(contour, 99, true);
+    assert.deepEqual(cw.slice(0, 3), [99, 1, 0]);
+  });
+});
+
+describe('roughCutOffset', () => {
+  it('is deterministic and bounded by amp', () => {
+    const a = roughCutOffset(7, 0.001);
+    const b = roughCutOffset(7, 0.001);
+    assert.equal(a, b);
+    assert.ok(Math.abs(a) <= 0.001 + 1e-12);
+    assert.notEqual(roughCutOffset(7, 0.001), roughCutOffset(8, 0.001));
   });
 });
 

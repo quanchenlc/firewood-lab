@@ -52,11 +52,13 @@ import {
   barkEdgeCutUv,
   classifyBarkEdgeCase,
   classifyFaceNormal,
-  cutCapAxesFromCleave,
   cutFaceCoverageRatio,
   cutTriAreaInPlane,
   estimateChordCover,
+  fanTriangulateContour,
   hasReclassifiedInnerSlot,
+  orderContourInPlane,
+  roughCutOffset,
   shouldSealCutFace,
   type BarkEdgeCase,
 } from './cut-face';
@@ -729,9 +731,13 @@ export function createFractureWorld(
       }
     }
 
-    /** CASE A/B/C chosen for this cleave — also drives cutCap seal UVs. */
+    /** CASE A/B/C for this cleave — drives fill + contour-seal UVs. */
     let barkCase: BarkEdgeCase = 'A';
     let chordCover = 1;
+    let faceUMin = 0;
+    let faceUMax = 1;
+    let faceVMin = 0;
+    let faceVMax = 1;
 
     if (cutVerts.size >= 3) {
       let uMin = Infinity;
@@ -748,6 +754,10 @@ export function createFractureWorld(
         vMin = Math.min(vMin, v);
         vMax = Math.max(vMax, v);
       }
+      faceUMin = uMin;
+      faceUMax = uMax;
+      faceVMin = vMin;
+      faceVMax = vMax;
       const midU = (uMin + uMax) * 0.5;
       let hasLeftBark = false;
       let hasRightBark = false;
@@ -826,114 +836,264 @@ export function createFractureWorld(
       coverageRatio = cutFaceCoverageRatio(area, expected);
     }
 
+    // Drop any legacy rectangular PlaneGeometry cutCap children (Option 1: no veneer).
+    for (const child of [...mesh.children]) {
+      if (child.userData?.role !== 'cutCap') continue;
+      mesh.remove(child);
+      const prev = child as THREE.Mesh;
+      prev.geometry?.dispose();
+      const prevMat = prev.material;
+      if (prevMat && !Array.isArray(prevMat) && 'dispose' in prevMat) {
+        (prevMat as THREE.Material).dispose();
+      }
+    }
+
+    // Option 1: if pinata fill is sparse, seal with a contour polygon from real
+    // bark-edge ∩ plane verts (shared indices → flush, no black seam). Dense
+    // high-coverage fills skip the extra seal.
+    if (shouldSealCutFace(cutTriCount, coverageRatio)) {
+      appendContourCutSeal(mesh, {
+        localN,
+        planeD,
+        tangent,
+        bitangent,
+        barkCase,
+        chordCover,
+        uMin: faceUMin,
+        uMax: faceUMax,
+        vMin: faceVMin,
+        vMax: faceVMax,
+      });
+    }
+
+    // Light deterministic rough-cut micro-displacement along the cut normal
+    // for verts on this cleave (shared fill + seal). Tiny amp — no gaps.
+    applyRoughCutDisplacement(mesh, localN, planeD, cutVerts);
+
     // Reclassify every triangle → bark / endgrain / inner (3 materials).
     reclassifyPieceMaterials(mesh, planeNormal, mats);
 
-    // Seal when fill is sparse; skip redundant cutCap when coverage is solid.
-    if (shouldSealCutFace(cutTriCount, coverageRatio)) {
-      mesh.updateMatrixWorld(true);
-      const box = new THREE.Box3().setFromObject(mesh);
-      const size = box.getSize(new THREE.Vector3());
-      // Size from piece AABB on the cut plane (not sparse cutVerts — those
-      // undersize when triangulation only filled half the face).
-      const spanU =
-        Math.abs(localN.x) >= Math.abs(localN.z) ? size.z : size.x;
-      const width = Math.max(0.12, spanU * 1.04);
-      const height = Math.max(0.15, size.y * 1.02);
-      const capGeo = new THREE.PlaneGeometry(width, height, 1, 1);
-      // Same CASE A/B/C atlas window as pinata fill (PlaneGeometry U is already 0→1).
-      const sealUv = capGeo.attributes.uv as THREE.BufferAttribute;
-      for (let i = 0; i < sealUv.count; i++) {
-        const u0 = sealUv.getX(i);
-        const v0 = sealUv.getY(i);
-        sealUv.setXY(i, applyBarkEdgeCaseU(u0, barkCase, chordCover), v0);
+    // DoubleSide on all three; no polygonOffset / plane offset.
+    for (const m of [mats.bark, mats.endgrain, mats.inner]) {
+      if (m && 'side' in m) (m as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+      if (m && 'polygonOffset' in m) {
+        const sm = m as THREE.MeshStandardMaterial;
+        sm.polygonOffset = false;
+        sm.polygonOffsetFactor = 0;
+        sm.polygonOffsetUnits = 0;
       }
-      sealUv.needsUpdate = true;
-      // Align seal U/V with fill tangent/bitangent (not free-twist setFromUnitVectors).
-      const capAxes = cutCapAxesFromCleave(
-        { x: tangent.x, y: tangent.y, z: tangent.z },
-        { x: bitangent.x, y: bitangent.y, z: bitangent.z },
-        { x: localN.x, y: localN.y, z: localN.z },
-      );
-      _axisX.set(capAxes.x.x, capAxes.x.y, capAxes.x.z);
-      _axisY.set(capAxes.y.x, capAxes.y.y, capAxes.y.z);
-      _axisZ.set(capAxes.z.x, capAxes.z.y, capAxes.z.z);
-      _basis.makeBasis(_axisX, _axisY, _axisZ);
-      const quat = new THREE.Quaternion().setFromRotationMatrix(_basis);
-      const capMat =
-        mats.inner && 'clone' in mats.inner
-          ? (mats.inner.clone() as THREE.MeshStandardMaterial)
-          : new THREE.MeshStandardMaterial({
-              color: 0xc4a574,
-              roughness: 0.88,
-              side: THREE.DoubleSide,
-            });
-      if ('side' in capMat) capMat.side = THREE.DoubleSide;
-      // Ensure photographic side-grain (clone keeps map; fallback solid tint).
-      if ('polygonOffset' in capMat) {
-        capMat.polygonOffset = true;
-        capMat.polygonOffsetFactor = -1;
-        capMat.polygonOffsetUnits = -1;
-      }
+    }
+  }
 
-      const localPos = new THREE.Vector3();
-      const worldCenter = box.getCenter(new THREE.Vector3());
-      const localCenter = mesh.worldToLocal(worldCenter.clone());
-      if (planeD !== null) {
-        // Project piece center onto this cleave plane — stable when cutVerts
-        // only cover a corner of a holed face.
-        localPos
-          .copy(localCenter)
-          .addScaledVector(localN, planeD - localN.dot(localCenter));
-        // Nudge into the empty half-space (away from solid) so the seal is not
-        // buried inside remaining tris / depth-fighting the pinata fill.
-        const sideSign = Math.sign(localN.dot(localCenter) - planeD) || 1;
-        localPos.addScaledVector(localN, -sideSign * 0.004);
-      } else if (cutVerts.size >= 3) {
-        const avg = new THREE.Vector3();
-        const tmp = new THREE.Vector3();
-        for (const vi of cutVerts) {
+  /**
+   * Append a fan-triangulated cut seal from exterior verts that lie on the
+   * cleave plane (real intersection polygon). Positions match bark-edge
+   * intersections (flush, no AABB veneer); verts are duplicated so cut
+   * normals stay hard-edged without rewriting bark shading.
+   */
+  function appendContourCutSeal(
+    mesh: DestructibleMesh,
+    opts: {
+      localN: THREE.Vector3;
+      planeD: number | null;
+      tangent: THREE.Vector3;
+      bitangent: THREE.Vector3;
+      barkCase: BarkEdgeCase;
+      chordCover: number;
+      uMin: number;
+      uMax: number;
+      vMin: number;
+      vMax: number;
+    },
+  ): number {
+    const geo = mesh.geometry;
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const uvAttr = geo.attributes.uv as THREE.BufferAttribute | undefined;
+    const index = geo.index;
+    if (!index || !uvAttr) return 0;
+
+    const { localN, tangent, bitangent, barkCase, chordCover } = opts;
+    let planeD = opts.planeD;
+    const planeEps = 0.022;
+    const tmp = new THREE.Vector3();
+
+    // If planeD unknown, infer from current cut-group verts.
+    if (planeD === null) {
+      const cutG = geo.groups.find((g) => g.materialIndex === 1);
+      if (cutG && cutG.count > 0) {
+        let sum = 0;
+        let n = 0;
+        const end = cutG.start + cutG.count;
+        for (let i = cutG.start; i < end; i++) {
+          tmp.fromBufferAttribute(pos, index.getX(i));
+          sum += tmp.dot(localN);
+          n++;
+        }
+        if (n > 0) planeD = sum / n;
+      }
+    }
+    if (planeD === null) return 0;
+
+    // Rim = exterior (non-cut) verts on the plane — bark + endgrain ∩ cleave.
+    const rimSet = new Set<number>();
+    for (const g of geo.groups) {
+      if ((g.materialIndex ?? 0) === 1) continue;
+      const end = g.start + g.count;
+      for (let i = g.start; i < end; i++) {
+        const vi = index.getX(i);
+        tmp.fromBufferAttribute(pos, vi);
+        if (Math.abs(tmp.dot(localN) - planeD) <= planeEps) rimSet.add(vi);
+      }
+    }
+    // Fallback: cut-group verts on the plane (when exterior rim is sparse).
+    if (rimSet.size < 3) {
+      const cutG = geo.groups.find((g) => g.materialIndex === 1);
+      if (cutG) {
+        const end = cutG.start + cutG.count;
+        for (let i = cutG.start; i < end; i++) {
+          const vi = index.getX(i);
           tmp.fromBufferAttribute(pos, vi);
-          avg.add(tmp);
-        }
-        avg.multiplyScalar(1 / cutVerts.size);
-        localPos.copy(avg);
-      } else {
-        const extent =
-          Math.abs(localN.x) * size.x * 0.5 + Math.abs(localN.z) * size.z * 0.5;
-        const toOrigin = new THREE.Vector3(-localCenter.x, 0, -localCenter.z);
-        const sideSign = Math.sign(toOrigin.dot(localN)) || 1;
-        localPos
-          .copy(localCenter)
-          .addScaledVector(localN, sideSign * extent * 0.92);
-      }
-
-      for (const child of [...mesh.children]) {
-        if (child.userData?.role === 'cutCap') {
-          mesh.remove(child);
-          const prev = child as THREE.Mesh;
-          prev.geometry?.dispose();
-          const prevMat = prev.material;
-          if (prevMat && !Array.isArray(prevMat) && 'dispose' in prevMat) {
-            // Seal mats are clones — safe to dispose.
-            (prevMat as THREE.Material).dispose();
-          }
+          if (Math.abs(tmp.dot(localN) - planeD) <= planeEps) rimSet.add(vi);
         }
       }
+    }
+    if (rimSet.size < 3) return 0;
 
-      const cap = new THREE.Mesh(capGeo, capMat);
-      cap.quaternion.copy(quat);
-      cap.position.copy(localPos);
-      cap.userData.role = 'cutCap';
-      cap.renderOrder = 2;
-      cap.castShadow = true;
-      cap.receiveShadow = true;
-      mesh.add(cap);
+    const planar = [...rimSet].map((vi) => {
+      tmp.fromBufferAttribute(pos, vi);
+      return {
+        i: vi,
+        u: tmp.dot(tangent),
+        v: tmp.dot(bitangent),
+      };
+    });
+    const sourceContour = orderContourInPlane(planar);
+    if (sourceContour.length < 3) return 0;
+
+    // Expand UV bounds if rim extends past prior cutVerts AABB.
+    let uMin = opts.uMin;
+    let uMax = opts.uMax;
+    let vMin = opts.vMin;
+    let vMax = opts.vMax;
+    for (const p of planar) {
+      uMin = Math.min(uMin, p.u);
+      uMax = Math.max(uMax, p.u);
+      vMin = Math.min(vMin, p.v);
+      vMax = Math.max(vMax, p.v);
     }
 
-    if ('side' in mats.inner) {
-      (mats.inner as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+    // Projected centroid of the ordered contour (on-plane).
+    const avg = new THREE.Vector3();
+    let cu = 0;
+    let cv = 0;
+    for (const vi of sourceContour) {
+      tmp.fromBufferAttribute(pos, vi);
+      avg.add(tmp);
+      cu += tmp.dot(tangent);
+      cv += tmp.dot(bitangent);
     }
+    avg.multiplyScalar(1 / sourceContour.length);
+    avg.addScaledVector(localN, planeD - localN.dot(avg));
+    cu /= sourceContour.length;
+    cv /= sourceContour.length;
+
+    // Fragment side → winding so cap faces outward (empty half-space).
+    mesh.updateMatrixWorld(true);
+    const localCenter = mesh.worldToLocal(
+      new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3()),
+    );
+    const sideSign = Math.sign(localN.dot(localCenter) - planeD) || 1;
+    // CCW in (u,v) → normal -localN; flip when solid is on -localN side.
+    const flipWinding = sideSign < 0;
+    const ox = -sideSign * localN.x;
+    const oy = -sideSign * localN.y;
+    const oz = -sideSign * localN.z;
+
+    const posArr = Array.from(pos.array as ArrayLike<number>);
+    const uvArr = Array.from(uvAttr.array as ArrayLike<number>);
+    const norAttr = geo.attributes.normal as THREE.BufferAttribute | undefined;
+    const norArr = norAttr
+      ? Array.from(norAttr.array as ArrayLike<number>)
+      : null;
+
+    // Duplicate contour verts at identical positions (hard-edge normal split).
+    const contour: number[] = [];
+    for (const src of sourceContour) {
+      const xi = pos.getX(src);
+      const yi = pos.getY(src);
+      const zi = pos.getZ(src);
+      const newIndex = posArr.length / 3;
+      posArr.push(xi, yi, zi);
+      tmp.set(xi, yi, zi);
+      const m = barkEdgeCutUv(
+        tmp.dot(tangent),
+        tmp.dot(bitangent),
+        uMin,
+        uMax,
+        vMin,
+        vMax,
+      );
+      uvArr.push(applyBarkEdgeCaseU(m.u, barkCase, chordCover), m.v);
+      if (norArr) norArr.push(ox, oy, oz);
+      contour.push(newIndex);
+    }
+
+    const mapped = barkEdgeCutUv(cu, cv, uMin, uMax, vMin, vMax);
+    const centroidIndex = posArr.length / 3;
+    posArr.push(avg.x, avg.y, avg.z);
+    uvArr.push(applyBarkEdgeCaseU(mapped.u, barkCase, chordCover), mapped.v);
+    if (norArr) norArr.push(ox, oy, oz);
+
+    const fan = fanTriangulateContour(contour, centroidIndex, flipWinding);
+    if (fan.length < 3) return 0;
+
+    const idxArr = Array.from(index.array as ArrayLike<number>);
+    const fanStart = idxArr.length;
+    for (const vi of fan) idxArr.push(vi);
+
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvArr, 2));
+    if (norArr) {
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(norArr, 3));
+    }
+    geo.setIndex(idxArr);
+    // Tag new tris as pinata cut/inner (materialIndex 1) for reclassify.
+    geo.addGroup(fanStart, fan.length, 1);
+    geo.computeBoundingSphere();
+
+    return fan.length / 3;
+  }
+
+  /**
+   * Tiny deterministic displacement along cut normal for interior cut-face
+   * verts only (pinata fill). Skips exterior-shared rim verts and does not
+   * walk newly sealed contour copies — keeps the bark edge flush.
+   */
+  function applyRoughCutDisplacement(
+    mesh: DestructibleMesh,
+    localN: THREE.Vector3,
+    _planeD: number | null,
+    seedCutVerts: Set<number>,
+  ): void {
+    const geo = mesh.geometry;
+    const pos = geo.attributes.position as THREE.BufferAttribute | undefined;
+    const index = geo.index;
+    if (!pos || !index || seedCutVerts.size === 0) return;
+    const tmp = new THREE.Vector3();
+    const exterior = new Set<number>();
+    for (const g of geo.groups) {
+      if ((g.materialIndex ?? 0) === 1) continue;
+      const end = g.start + g.count;
+      for (let i = g.start; i < end; i++) exterior.add(index.getX(i));
+    }
+    for (const vi of seedCutVerts) {
+      if (exterior.has(vi)) continue;
+      const off = roughCutOffset(vi, 0.0008);
+      tmp.fromBufferAttribute(pos, vi);
+      tmp.addScaledVector(localN, off);
+      pos.setXYZ(vi, tmp.x, tmp.y, tmp.z);
+    }
+    pos.needsUpdate = true;
   }
 
   /** Pull bark / endgrain / inner from userData or the current material array. */
