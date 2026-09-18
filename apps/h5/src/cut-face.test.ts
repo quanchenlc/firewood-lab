@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   aspectCorrectUv,
+  classifyExteriorNormal,
   classifyFaceNormal,
   projectionSpan,
 } from './cut-face.ts';
@@ -17,14 +18,47 @@ describe('classifyFaceNormal', () => {
     assert.equal(classifyFaceNormal({ x: 0.1, y: -0.95, z: 0 }, plane), 'endgrain');
   });
 
-  it('faces aligned with cleave normal → inner', () => {
-    assert.equal(classifyFaceNormal({ x: 1, y: 0, z: 0 }, plane), 'inner');
-    assert.equal(classifyFaceNormal({ x: -0.9, y: 0.1, z: 0.1 }, plane), 'inner');
+  it('pinata cut-group tris → inner (explicit flag)', () => {
+    assert.equal(
+      classifyFaceNormal({ x: 1, y: 0, z: 0 }, plane, { isCutGroup: true }),
+      'inner',
+    );
+    assert.equal(
+      classifyFaceNormal({ x: -1, y: 0, z: 0 }, plane, { isCutGroup: true }),
+      'inner',
+    );
   });
 
   it('radial bark sides → bark', () => {
     assert.equal(classifyFaceNormal({ x: 0, y: 0, z: 1 }, plane), 'bark');
     assert.equal(classifyFaceNormal({ x: 0.2, y: 0.1, z: 0.95 }, plane), 'bark');
+  });
+
+  it('outer mantle facing away from cleave stays bark (not |n·plane| trap)', () => {
+    // +X half: curved mantle normals span roughly -90°..+90° around +X.
+    // Old |n·plane| heuristic tagged most of these as "inner".
+    for (let a = -Math.PI / 2; a <= Math.PI / 2 + 1e-9; a += Math.PI / 16) {
+      const nx = Math.cos(a);
+      const nz = Math.sin(a);
+      assert.equal(
+        classifyFaceNormal({ x: nx, y: 0, z: nz }, plane),
+        'bark',
+        `mantle angle ${(a * 180) / Math.PI}° should stay bark`,
+      );
+    }
+  });
+
+  it('cleave-aligned exterior without cut-group flag is still bark', () => {
+    // Must not infer inner from normals alone — that is the post-#22 bark bug.
+    assert.equal(classifyFaceNormal({ x: 1, y: 0, z: 0 }, plane), 'bark');
+    assert.equal(classifyFaceNormal({ x: -0.9, y: 0.1, z: 0.1 }, plane), 'bark');
+  });
+});
+
+describe('classifyExteriorNormal', () => {
+  it('splits caps vs sides by |ny|', () => {
+    assert.equal(classifyExteriorNormal({ x: 0, y: 1, z: 0 }), 'endgrain');
+    assert.equal(classifyExteriorNormal({ x: 0.7, y: 0, z: 0.7 }), 'bark');
   });
 });
 

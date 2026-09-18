@@ -7,6 +7,12 @@
  *
  * UVs on new cut faces use a cut-plane projection with a *uniform* world-space
  * scale (V along log height / grain) — never independent u/v → [0,1]² stretch.
+ *
+ * IMPORTANT: do NOT classify exterior mantle as "inner" via |n·cleavePlane|.
+ * On each half-log the outer bark normals point *away* from the cut, so
+ * |n·plane| ≈ 1 across most of the curved mantle — that heuristic paints bark
+ * with the side-grain / wrong slot and destroys the photographic bark look.
+ * Cut faces come from pinata's cut group (materialIndex 1); caps use |ny|.
  */
 
 export type FaceKind = 'bark' | 'endgrain' | 'inner';
@@ -17,31 +23,35 @@ export interface Vec3 {
   z: number;
 }
 
-/** Classify a triangle by its face normal + cleave-plane normal (Y-up log). */
+export interface ClassifyOpts {
+  capThreshold?: number;
+  /**
+   * Triangle came from pinata's cut/inner group (materialIndex 1).
+   * Required to tag inner faces — never infer from |n·plane| alone.
+   */
+  isCutGroup?: boolean;
+}
+
+/** Caps vs bark for exterior tris (Y-up log). */
+export function classifyExteriorNormal(
+  faceNormal: Vec3,
+  opts?: { capThreshold?: number },
+): 'bark' | 'endgrain' {
+  const capT = opts?.capThreshold ?? 0.65;
+  return Math.abs(faceNormal.y) >= capT ? 'endgrain' : 'bark';
+}
+
+/**
+ * Classify a triangle after a cleave.
+ * Prefer `isCutGroup` from pinata groups; exterior uses |ny| only.
+ */
 export function classifyFaceNormal(
   faceNormal: Vec3,
-  planeNormal: Vec3,
-  opts?: { capThreshold?: number; cutThreshold?: number },
+  _planeNormal: Vec3,
+  opts?: ClassifyOpts,
 ): FaceKind {
-  const capT = opts?.capThreshold ?? 0.65;
-  const cutT = opts?.cutThreshold ?? 0.55;
-  const ny = Math.abs(faceNormal.y);
-  if (ny >= capT) return 'endgrain';
-
-  // Horizontal cleave normal in XZ
-  let px = planeNormal.x;
-  let pz = planeNormal.z;
-  const plen = Math.hypot(px, pz);
-  if (plen < 1e-8) {
-    px = 1;
-    pz = 0;
-  } else {
-    px /= plen;
-    pz /= plen;
-  }
-  const cutAlign = Math.abs(faceNormal.x * px + faceNormal.z * pz);
-  if (cutAlign >= cutT && ny < capT) return 'inner';
-  return 'bark';
+  if (opts?.isCutGroup) return 'inner';
+  return classifyExteriorNormal(faceNormal, { capThreshold: opts?.capThreshold });
 }
 
 /**
