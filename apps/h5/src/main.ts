@@ -836,18 +836,40 @@ async function boot(): Promise<void> {
       return out;
     },
     /** Debug: hide decorative InstancedMesh yard debris (screenshot clarity). */
-    /** Debug: chopping-block child meshes (expect body + top disk only). */
+    /** Debug: chopping-block child meshes (expect one closed CylinderGeometry). */
     dumpChoppingBlock: () => {
-      const out: Array<{ name: string; geo: string; y: number }> = [];
+      const out: Array<{
+        name: string;
+        geo: string;
+        y: number;
+        materials: number;
+        worldBox: { min: number[]; max: number[]; maxXZ: number };
+      }> = [];
+      const box = new THREE.Box3();
       logScene.scene.traverse((obj) => {
         if (obj.name !== 'chopping-block') return;
         obj.traverse((child) => {
           const mesh = child as THREE.Mesh;
-          if (!mesh.isMesh) return;
+          if (!mesh.isMesh || child === obj) return;
+          const mats = mesh.material;
+          mesh.updateMatrixWorld(true);
+          box.setFromObject(mesh);
+          const maxXZ = Math.max(
+            Math.abs(box.min.x),
+            Math.abs(box.max.x),
+            Math.abs(box.min.z),
+            Math.abs(box.max.z),
+          );
           out.push({
             name: mesh.name || '(mesh)',
             geo: (mesh.geometry as THREE.BufferGeometry)?.type ?? '?',
             y: +mesh.position.y.toFixed(3),
+            materials: Array.isArray(mats) ? mats.length : 1,
+            worldBox: {
+              min: [+box.min.x.toFixed(3), +box.min.y.toFixed(3), +box.min.z.toFixed(3)],
+              max: [+box.max.x.toFixed(3), +box.max.y.toFixed(3), +box.max.z.toFixed(3)],
+              maxXZ: +maxXZ.toFixed(3),
+            },
           });
         });
       });
@@ -862,6 +884,12 @@ async function boot(): Promise<void> {
         }
       });
       return n;
+    },
+    /** Debug: hide upright round so stump alone is visible in screenshots. */
+    hideChoppableLog: () => {
+      logScene.logMesh.visible = false;
+      for (const f of logScene.fracture.fragments) f.mesh.visible = false;
+      return true;
     },
     /** Debug: world pose of each fragment (radial = hypot(x,z); stump top R≈0.34). */
     fragmentPoses: () =>

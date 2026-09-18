@@ -213,32 +213,28 @@ export async function buildChoppingBlock(
     loadTexture(STUMP_TEX.nor).catch(() => null),
     loadTexture(STUMP_TEX.arm).catch(() => null),
   ]);
-  // Bark wraps once around the side — lower repeat reduces tiled / plastic look.
+  // Bark around the mantle — enough U wraps so grain reads as bark, not smear.
   diff.wrapS = diff.wrapT = THREE.RepeatWrapping;
-  diff.repeat.set(0.92, 0.72);
-  diff.offset.set(0.08, 0.12);
+  diff.repeat.set(1.8, 1.15);
   if (nor) {
     nor.wrapS = nor.wrapT = THREE.RepeatWrapping;
     nor.repeat.copy(diff.repeat);
-    nor.offset.copy(diff.offset);
   }
   if (arm) {
     // Poly Haven ARM: G=roughness. Keep wrap/offset matched to albedo.
     arm.wrapS = arm.wrapT = THREE.RepeatWrapping;
     arm.repeat.copy(diff.repeat);
-    arm.offset.copy(diff.offset);
   }
 
   const barkMat = new THREE.MeshStandardMaterial({
     map: diff,
     normalMap: nor ?? undefined,
     // Soften bump so daylight doesn't read as shiny plastic bark.
-    normalScale: nor ? new THREE.Vector2(0.45, 0.45) : undefined,
+    normalScale: nor ? new THREE.Vector2(0.5, 0.5) : undefined,
     roughnessMap: arm ?? undefined,
     roughness: 1,
     metalness: 0,
-    // Slight warm albedo pull — dry outdoor stump, not grey plastic.
-    color: 0xf0e6d8,
+    color: 0xf2ebe0,
   });
   // Flat sawn face — end-grain rings so the chopping face reads clearly.
   const endMap = await loadTexture('assets/endgrain/toona.png', THREE.SRGBColorSpace).catch(
@@ -251,10 +247,13 @@ export async function buildChoppingBlock(
   const cutMat = new THREE.MeshStandardMaterial({
     map: endMap ?? undefined,
     // Warm sandy end-grain (not pure white → less plastic specular).
-    color: endMap ? 0xf2e4cc : 0xc9a978,
-    roughness: 0.96,
+    color: endMap ? 0xf5ead4 : 0xc9a978,
+    roughness: 0.95,
     metalness: 0,
   });
+  // Bottom sits on yard ground — dark bark, never a bright endgrain disk.
+  const bottomMat = barkMat.clone();
+  bottomMat.color = new THREE.Color(0x5a4030);
 
   // Matched to the smaller choppable round in `log-dimensions.ts`.
   // Organic silhouette (not a clean cylinder) — same plan-noise family as the log.
@@ -262,40 +261,32 @@ export async function buildChoppingBlock(
   const BOT_R = STUMP_BOT_RADIUS;
   const HEIGHT = STUMP_HEIGHT;
   const stumpSeed = 41;
-  // Shared amp so cylinder top rim and cut-face disk stay outline-coherent.
-  const stumpAmpIn = 0.34;
+  const stumpAmpIn = 0.3;
 
   const root = new THREE.Group();
   root.name = 'chopping-block';
 
-  // Open-ended cylinder: no bark-textured caps (caps looked like a plastic rim /
-  // muddy disk). Flat end-grain CircleGeometry is the only top face.
-  const bodyGeo = new THREE.CylinderGeometry(TOP_R, BOT_R, HEIGHT, 40, 5, true);
+  /**
+   * One closed cylinder (side / top / bottom groups) — solid stump.
+   * Avoids openEnded hollow shells (read as exploded bark on mobile) and a
+   * separate CircleGeometry top (could desync from the mantle outline).
+   * No Torus rim, no packed-earth pad.
+   * Material groups: 0=side bark, 1=top endgrain, 2=bottom.
+   */
+  const bodyGeo = new THREE.CylinderGeometry(TOP_R, BOT_R, HEIGHT, 40, 5, false);
   applyStumpOutlineIrregularity(bodyGeo, {
     height: HEIGHT,
     seed: stumpSeed,
     ampIn: stumpAmpIn,
+    refRadiusTop: TOP_R,
+    refRadiusBot: BOT_R,
   });
-  const body = new THREE.Mesh(bodyGeo, barkMat);
+  const body = new THREE.Mesh(bodyGeo, [barkMat, cutMat, bottomMat]);
+  body.name = 'chopping-block-body';
   body.position.y = HEIGHT * 0.5;
   body.castShadow = true;
   body.receiveShadow = true;
   root.add(body);
-
-  // Same radius + seed + amp as the body top — no torus rim / plastic hoop.
-  // Slight oversize so bark mantle edge never peeks as a false rim.
-  const topGeo = new THREE.CircleGeometry(TOP_R * 1.01, 48);
-  applyStumpOutlineIrregularity(topGeo, {
-    height: HEIGHT,
-    seed: stumpSeed,
-    ampIn: stumpAmpIn,
-    plane: 'xy',
-  });
-  const top = new THREE.Mesh(topGeo, cutMat);
-  top.rotation.x = -Math.PI / 2;
-  top.position.y = HEIGHT + 0.001;
-  top.receiveShadow = true;
-  root.add(top);
 
   const topY = HEIGHT;
   return { root, topY, topRadius: TOP_R, height: HEIGHT };

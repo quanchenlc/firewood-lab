@@ -152,4 +152,37 @@ describe('log-dimensions (firewood-scale round)', () => {
     // Cap-rim bark offset is non-zero (reference displaces rim verts).
     assert.notEqual(radialBarkOffsetMetres(0.3, 1, dims.barkSeed), 0);
   });
+
+  it('stump outline does not explode closed-cylinder cap interiors', () => {
+    // Regression (#26): additive bark/radial on near-axis cap verts → giant pancake.
+    const topR = STUMP_TOP_RADIUS;
+    const botR = STUMP_BOT_RADIUS;
+    const h = STUMP_HEIGHT;
+    const seed = 41;
+    const ampIn = 0.3;
+    let maxTopR = 0;
+    let maxBotR = 0;
+    // Mimic applyStumpOutlineIrregularity edge fade on cap samples (incl. near-axis).
+    for (let ring = 1; ring <= 10; ring++) {
+      const frac = ring / 10;
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        for (const [y, refR, sink] of [
+          [h * 0.5, topR, (r: number) => { maxTopR = Math.max(maxTopR, r); }],
+          [-h * 0.5, botR, (r: number) => { maxBotR = Math.max(maxBotR, r); }],
+        ] as const) {
+          const radial = refR * frac;
+          if (radial < 1e-4) continue;
+          const heightFrac = Math.max(0, Math.min(1, (y + h * 0.5) / h));
+          const plan = planSilhouetteScale(a, seed + 9);
+          const bark = radialBarkOffsetMetres(a, heightFrac, seed, ampIn);
+          const edge = Math.min(1, radial / Math.max(refR * 0.85, 1e-6));
+          const targetR = radial * plan + bark * edge;
+          sink(targetR);
+        }
+      }
+    }
+    assert.ok(maxTopR < topR * 1.55, `top cap exploded: ${maxTopR} vs ${topR}`);
+    assert.ok(maxBotR < botR * 1.55, `bot cap exploded: ${maxBotR} vs ${botR}`);
+  });
 });
