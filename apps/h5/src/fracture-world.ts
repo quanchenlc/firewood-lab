@@ -708,6 +708,10 @@ export function createFractureWorld(
         localPos
           .copy(localCenter)
           .addScaledVector(localN, planeD - localN.dot(localCenter));
+        // Nudge into the empty half-space (away from solid) so the seal is not
+        // buried inside remaining tris / depth-fighting the pinata fill.
+        const sideSign = Math.sign(localN.dot(localCenter) - planeD) || 1;
+        localPos.addScaledVector(localN, -sideSign * 0.004);
       } else if (cutVerts.size >= 3) {
         const avg = new THREE.Vector3();
         const tmp = new THREE.Vector3();
