@@ -268,7 +268,9 @@ export async function buildChoppingBlock(
   const root = new THREE.Group();
   root.name = 'chopping-block';
 
-  const bodyGeo = new THREE.CylinderGeometry(TOP_R, BOT_R, HEIGHT, 40, 5);
+  // Open-ended cylinder: no bark-textured caps (caps looked like a plastic rim /
+  // muddy disk). Flat end-grain CircleGeometry is the only top face.
+  const bodyGeo = new THREE.CylinderGeometry(TOP_R, BOT_R, HEIGHT, 40, 5, true);
   applyStumpOutlineIrregularity(bodyGeo, {
     height: HEIGHT,
     seed: stumpSeed,
@@ -281,7 +283,8 @@ export async function buildChoppingBlock(
   root.add(body);
 
   // Same radius + seed + amp as the body top — no torus rim / plastic hoop.
-  const topGeo = new THREE.CircleGeometry(TOP_R, 48);
+  // Slight oversize so bark mantle edge never peeks as a false rim.
+  const topGeo = new THREE.CircleGeometry(TOP_R * 1.01, 48);
   applyStumpOutlineIrregularity(topGeo, {
     height: HEIGHT,
     seed: stumpSeed,
