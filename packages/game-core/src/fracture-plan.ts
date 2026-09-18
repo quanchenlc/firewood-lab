@@ -86,10 +86,34 @@ export const TIP_DROP_REST_RADIAL_JIT = 0.14;
 /** Round-end scatter rests a bit farther out than single-chip tip-drop. */
 export const TIP_DROP_SCATTER_RADIAL = 0.82;
 export const TIP_DROP_SCATTER_RADIAL_JIT = 0.2;
-/** Ground clearance for a tipped chip center (added to half-thickness). */
+/**
+ * Mid-animation Y estimate pad (added to thin-axis half-height).
+ * Final rest Y is corrected by AABB-min settle after tip — do not treat this
+ * as the absolute ground contact height.
+ */
 export const TIP_DROP_GROUND_PAD = 0.02;
 /** Reserved soft-physics window after tip (ms). Currently settle stays STATIC. */
 export const TIP_DROP_POST_SETTLE_MS = 200;
+/**
+ * Visual / settle yard ground plane Y (metres). Physics Plane is at y=0;
+ * tip-drop and ring-pile AABB settle share this so chips sit flush on dirt.
+ */
+export const YARD_GROUND_Y = 0;
+/** Tiny lift above contact so meshes don't z-fight the ground (1.5 mm). */
+export const GROUND_SETTLE_EPS = 0.0015;
+
+/**
+ * World Y for a mesh whose AABB min.y was measured at the current pose,
+ * so the lowest point sits on `groundY` (+eps).
+ * Same pattern as stump `supportY - box.min.y`, with a 1–2 mm epsilon.
+ */
+export function settlePositionY(
+  boxMinY: number,
+  groundY: number = YARD_GROUND_Y,
+  eps: number = GROUND_SETTLE_EPS,
+): number {
+  return groundY + eps - boxMinY;
+}
 
 /**
  * Ring firewood pile after a full stump is chopped
@@ -817,6 +841,7 @@ export function tipDropRestPose(input: {
   const fromR = Math.hypot(input.fromX, input.fromZ);
   const targetR = Math.max(restRadial, fromR + 0.08);
   const pad = input.groundPad ?? TIP_DROP_GROUND_PAD;
+  // Mid-anim estimate only — final rest is AABB-settled after tip quaternion.
   const toY = Math.max(0.04, input.restHalfHeight + pad);
   return {
     toX: ox * targetR,

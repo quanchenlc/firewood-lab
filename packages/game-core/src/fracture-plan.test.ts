@@ -38,10 +38,13 @@ import {
   planFracture,
   planRingPileSlots,
   sampleTipDropPose,
+  settlePositionY,
   shouldTossOnTooThin,
   thicknessInchesAlong,
   tipDropRestPose,
   volumeInchesFromBBox,
+  YARD_GROUND_Y,
+  GROUND_SETTLE_EPS,
   ringPileSimToWorldAxes,
   pickLocalGrainAxis,
   isCrossSectionXThinner,
@@ -393,6 +396,69 @@ describe('tipDropRestPose / sampleTipDropPose', () => {
     assert.ok(TIP_DROP_ANGLE_DEG >= 60 && TIP_DROP_ANGLE_DEG <= 95);
     assert.ok(TIP_DROP_REST_RADIAL >= 0.55 && TIP_DROP_REST_RADIAL <= 0.85);
     assert.ok(TIP_DROP_SCATTER_RADIAL > TIP_DROP_REST_RADIAL);
+  });
+});
+
+describe('settlePositionY (AABB-min ground settle)', () => {
+  it('lifts origin so box.min sits on groundY + eps', () => {
+    // Mesh origin above lowest point (typical tipped chip): min.y = -0.08 at y=0.12
+    // → dy = 0 + 0.0015 - (-0.08) = 0.0815 → new min ≈ eps
+    const dy = settlePositionY(-0.08, YARD_GROUND_Y);
+    assert.ok(Math.abs(dy - (YARD_GROUND_Y + GROUND_SETTLE_EPS - -0.08)) < 1e-12);
+    assert.ok(Math.abs((-0.08 + dy) - GROUND_SETTLE_EPS) < 1e-12);
+  });
+
+  it('lowers when thin-axis heuristic overshot (floating chip)', () => {
+    // After tip, mesh at toY=0.08 but true lowest point is box.min.y=0.04
+    const dy = settlePositionY(0.04, 0, GROUND_SETTLE_EPS);
+    assert.ok(dy < 0);
+    assert.ok(Math.abs(0.04 + dy - GROUND_SETTLE_EPS) < 1e-12);
+  });
+
+  it('eps stays in 1–2 mm band; yard ground matches physics plane', () => {
+    assert.equal(YARD_GROUND_Y, 0);
+    assert.ok(GROUND_SETTLE_EPS >= 0.001 && GROUND_SETTLE_EPS <= 0.002);
+  });
+
+  it('supports stacked ring lift via elevated groundY', () => {
+    const stackGround = 0.05;
+    const dy = settlePositionY(-0.03, stackGround);
+    assert.ok(Math.abs(-0.03 + dy - (stackGround + GROUND_SETTLE_EPS)) < 1e-12);
+  });
+
+  it('no-op when already flush (min already at ground+eps)', () => {
+    const minY = YARD_GROUND_Y + GROUND_SETTLE_EPS;
+    assert.ok(Math.abs(settlePositionY(minY)) < 1e-12);
+  });
+
+  it('handles eccentric pinata: large origin↔lowest gap after ~78° tip', () => {
+    // Upright heuristic restHalfHeight*pad ≈ 0.08, but after tip true contact
+    // needs +0.05 more lift from current wrong Y where min floats at +0.05
+    const floatingMinY = 0.05;
+    const dy = settlePositionY(floatingMinY);
+    assert.ok(dy < -0.04);
+    assert.ok(Math.abs(floatingMinY + dy - GROUND_SETTLE_EPS) < 1e-12);
+  });
+
+  it('works with negative groundY if callers opt in', () => {
+    const dy = settlePositionY(-0.02, -0.01, 0.001);
+    assert.ok(Math.abs(-0.02 + dy - (-0.01 + 0.001)) < 1e-12);
+  });
+
+  it('zero box min at origin → position.y becomes ground+eps', () => {
+    assert.equal(settlePositionY(0, 0, 0.0015), 0.0015);
+  });
+
+  it('symmetric: raising then reading min recovers eps', () => {
+    const cases = [-0.12, -0.05, 0, 0.02, 0.07];
+    for (const minY of cases) {
+      const newMin = minY + settlePositionY(minY, 0, 0.0015);
+      assert.ok(Math.abs(newMin - 0.0015) < 1e-12, `minY=${minY}`);
+    }
+  });
+
+  it('custom eps overrides default', () => {
+    assert.ok(Math.abs(settlePositionY(-0.1, 0, 0.002) - 0.102) < 1e-12);
   });
 });
 

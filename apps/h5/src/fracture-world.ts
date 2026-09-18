@@ -14,11 +14,13 @@ import {
   MAX_LIVE_FRAGMENTS,
   MIN_RECHOP_DIAGONAL,
   planRingPileSlots,
+  RING_PILE_GROUND_PAD,
   RING_PILE_RADIUS,
   RING_PILE_RECYCLE_JIT_MS,
   RING_PILE_RECYCLE_MS,
   RING_PILE_STAGGER_MS,
   sampleTipDropPose,
+  settlePositionY,
   thicknessInchesAlong,
   tipDropRestPose,
   TIP_DROP_ANGLE_DEG,
@@ -35,6 +37,7 @@ import {
   TIP_DROP_YAW_JIT_DEG,
   TINY_CHIP_DIAGONAL,
   volumeInchesFromBBox,
+  YARD_GROUND_Y,
   type FracturePlan,
 } from '@firewood/game-core';
 import {
@@ -42,6 +45,9 @@ import {
   classifyFaceNormal,
   projectionSpan,
 } from './cut-face';
+
+/** Scratch box for AABB ground settle (tip-drop + ring pile). */
+const _settleBox = new THREE.Box3();
 
 /**
  * Scripted settle bounce — mirrors screen.toys/firewood `performSplit` animator
@@ -1100,15 +1106,20 @@ export function createFractureWorld(
     f.body.quaternion.set(_outQ.x, _outQ.y, _outQ.z, _outQ.w);
 
     if (u >= 1) {
-      f.body.position.set(t.toX, t.toY, t.toZ);
-      f.mesh.position.set(t.toX, t.toY, t.toZ);
+      // Final tip pose, then AABB-min settle onto yard ground (stump-piece pattern).
+      // Thin-axis toY is only a mid-anim estimate — eccentric pinata AABBs float otherwise.
       _yawQ.setFromAxisAngle(up, t.yawRad);
       _tiltQ.setFromAxisAngle(_tiltAxis, t.tipRad);
       _outQ.copy(t.baseQuat).multiply(_yawQ).multiply(_tiltQ);
+      f.mesh.position.set(t.toX, t.toY, t.toZ);
       f.mesh.quaternion.copy(_outQ);
+      f.mesh.updateMatrixWorld(true);
+      _settleBox.setFromObject(f.mesh);
+      f.mesh.position.y += settlePositionY(_settleBox.min.y, YARD_GROUND_Y);
+      f.body.position.set(f.mesh.position.x, f.mesh.position.y, f.mesh.position.z);
       f.body.quaternion.set(_outQ.x, _outQ.y, _outQ.z, _outQ.w);
       f.tipDrop = undefined;
-      // Soft handoff: light dynamic body so chips can nest into a pile.
+      // STATIC handoff after correct Y — avoids stump bounce on re-enable.
       finishTipDropHandoff(f);
     }
     return true;
@@ -1435,7 +1446,7 @@ export function createFractureWorld(
     }
   }
 
-  /** Rest half-height after tipping onto the thinnest axis. */
+  /** Rest half-height estimate for mid-tip-drop arc (thin axis). Final Y uses AABB settle. */
   function tipRestHalfHeight(mesh: THREE.Mesh): number {
     mesh.updateMatrixWorld(true);
     const size = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3());
@@ -1566,7 +1577,7 @@ export function createFractureWorld(
   /** Slide every live fragment into a neat annular pile around the chopping block. */
   function recycleToRing(opts?: { radius?: number; groundY?: number }): void {
     const radius = opts?.radius ?? RING_PILE_RADIUS;
-    const groundY = opts?.groundY ?? 0;
+    const groundY = opts?.groundY ?? YARD_GROUND_Y;
     const now = performance.now();
     const live = fragments.filter((f) => f.mesh.visible);
     const n = live.length;
@@ -1624,19 +1635,41 @@ export function createFractureWorld(
       _basis.makeBasis(_axisX, _axisY, _axisZ);
       _toQ.setFromRotationMatrix(_basis);
 
+      const fromX = f.body.position.x;
+      const fromY = f.body.position.y;
+      const fromZ = f.body.position.z;
+      const fromQx = f.mesh.quaternion.x;
+      const fromQy = f.mesh.quaternion.y;
+      const fromQz = f.mesh.quaternion.z;
+      const fromQw = f.mesh.quaternion.w;
+
+      // AABB-min settle at final ring orientation; keep intentional stack lift
+      // encoded above the thin-axis heuristic floor in planRingPileSlots.
+      const halfH = halfHeights[i] ?? 0.05;
+      const heuristicFloor = groundY + halfH + RING_PILE_GROUND_PAD;
+      const stackExtra = Math.max(0, slot.y - heuristicFloor);
+      f.mesh.position.set(slot.x, 0, slot.z);
+      f.mesh.quaternion.copy(_toQ);
+      f.mesh.updateMatrixWorld(true);
+      _settleBox.setFromObject(f.mesh);
+      const settledY = settlePositionY(_settleBox.min.y, groundY + stackExtra);
+      // Restore current pose — recycle animator owns the lerp.
+      f.mesh.position.set(fromX, fromY, fromZ);
+      f.mesh.quaternion.set(fromQx, fromQy, fromQz, fromQw);
+
       f.recycle = {
         startAt: now + i * RING_PILE_STAGGER_MS,
         durationMs: RING_PILE_RECYCLE_MS + Math.random() * RING_PILE_RECYCLE_JIT_MS,
-        fromX: f.body.position.x,
-        fromY: f.body.position.y,
-        fromZ: f.body.position.z,
+        fromX,
+        fromY,
+        fromZ,
         toX: slot.x,
-        toY: slot.y,
+        toY: settledY,
         toZ: slot.z,
-        fromQx: f.mesh.quaternion.x,
-        fromQy: f.mesh.quaternion.y,
-        fromQz: f.mesh.quaternion.z,
-        fromQw: f.mesh.quaternion.w,
+        fromQx,
+        fromQy,
+        fromQz,
+        fromQw,
         toQx: _toQ.x,
         toQy: _toQ.y,
         toQz: _toQ.z,
