@@ -33,6 +33,9 @@ export interface LogScene {
   getRaycastTargets(): THREE.Object3D[];
   setOrbit(yaw: number, pitch: number): void;
   getOrbit(): { yaw: number; pitch: number };
+  /** Debug: pull camera back so the ring pile (~1.5 m) fits in frame. */
+  setCamRadius(r: number): void;
+  getCamRadius(): number;
   /**
    * Smooth ~90° azimuth nudge (reference `nudgeAzimuth`).
    * `sign` from click left (−1) / right (+1) of screen center.
@@ -263,7 +266,7 @@ export function createLogScene(
   /** Per-frame damped yaw velocity for too-thin camera nudge. */
   let azimuthVelocity = 0;
   const lookAt = new THREE.Vector3(0, CAM_LOOK_AT_Y, 0);
-  const camRadius = CAM_RADIUS;
+  let camRadius = CAM_RADIUS;
   /** Current upright round — resampled on each reset / species rebuild. */
   let roundDims: LogRoundDims = sampleLogRound();
 
@@ -479,7 +482,7 @@ export function createLogScene(
 
   function scatterAndRecycle(): void {
     fracture.scatterToGround();
-    // Let tip-drop finish, then pull into the annular ring pile (ref radius ≈ 60×ld).
+    // Tip-drop near stump first (mid-round feel); then pack into XC-grid crescent.
     window.setTimeout(() => {
       fracture.recycleToRing({ groundY: 0 });
     }, 720);
@@ -832,6 +835,11 @@ export function createLogScene(
       azimuthVelocity = 0;
     },
     getOrbit: () => ({ yaw, pitch }),
+    setCamRadius(r) {
+      camRadius = Math.max(1.5, Math.min(14, r));
+      azimuthVelocity = 0;
+    },
+    getCamRadius: () => camRadius,
     nudgeAzimuth(sign: number) {
       azimuthVelocity = azimuthNudgeVelocity(sign);
     },

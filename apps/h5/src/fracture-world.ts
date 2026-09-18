@@ -14,7 +14,6 @@ import {
   MAX_LIVE_FRAGMENTS,
   MIN_RECHOP_DIAGONAL,
   planRingPileSlots,
-  RING_PILE_GROUND_PAD,
   RING_PILE_RADIUS,
   RING_PILE_RECYCLE_JIT_MS,
   RING_PILE_RECYCLE_MS,
@@ -326,7 +325,7 @@ export function createFractureWorld(
   }
 
   /** Local geometry AABB size (fallback to world size). */
-  function localBBoxSize(mesh: THREE.Mesh, worldSize: THREE.Vector3): THREE.Vector3 {
+  function localBBoxSize(mesh: THREE.Mesh, worldSize?: THREE.Vector3): THREE.Vector3 {
     const geom = mesh.geometry;
     if (geom) {
       if (!geom.boundingBox) geom.computeBoundingBox();
@@ -339,7 +338,7 @@ export function createFractureWorld(
         );
       }
     }
-    return worldSize.clone();
+    return worldSize?.clone() ?? new THREE.Vector3(0.1, 0.1, 0.1);
   }
 
   /** Classify stump vs firewood using volume (in³) + horizontal aspect. */
@@ -1579,7 +1578,14 @@ export function createFractureWorld(
     const radius = opts?.radius ?? RING_PILE_RADIUS;
     const groundY = opts?.groundY ?? YARD_GROUND_Y;
     const now = performance.now();
-    const live = fragments.filter((f) => f.mesh.visible);
+    // Larger chips first → they form the crescent base (closer to ref settle order).
+    const live = fragments
+      .filter((f) => f.mesh.visible)
+      .sort((a, b) => {
+        const sa = localBBoxSize(a.mesh);
+        const sb = localBBoxSize(b.mesh);
+        return sb.x * sb.y * sb.z - sa.x * sa.y * sa.z;
+      });
     const n = live.length;
     if (n === 0) return;
 
@@ -1598,9 +1604,11 @@ export function createFractureWorld(
       sizeXs.push(local.x);
       sizeYs.push(local.y);
       sizeZs.push(local.z);
+      // Reference T = min(size.x, size.z) — half-height for ground settle pad.
+      const T = Math.max(0.04, Math.min(local.x, local.z));
+      halfHeights.push(T * 0.5);
+      // Arc packing uses XC grid; halfWidths kept for API / fallback size defaults.
       const sorted = [worldSize.x, worldSize.y, worldSize.z].sort((a, b) => a - b);
-      halfHeights.push(Math.max(0.03, sorted[0]! * 0.45));
-      // Arc packing uses mid extent (lying length/width along tangent).
       halfWidths.push(Math.max(0.04, sorted[1]! * 0.48));
       rnds.push(Math.random(), Math.random());
     }
@@ -1643,16 +1651,12 @@ export function createFractureWorld(
       const fromQz = f.mesh.quaternion.z;
       const fromQw = f.mesh.quaternion.w;
 
-      // AABB-min settle at final ring orientation; keep intentional stack lift
-      // encoded above the thin-axis heuristic floor in planRingPileSlots.
-      const halfH = halfHeights[i] ?? 0.05;
-      const heuristicFloor = groundY + halfH + RING_PILE_GROUND_PAD;
-      const stackExtra = Math.max(0, slot.y - heuristicFloor);
+      // AABB-min settle: bottom on ground + physicalBaseY (stack lift from XC grid).
       f.mesh.position.set(slot.x, 0, slot.z);
       f.mesh.quaternion.copy(_toQ);
       f.mesh.updateMatrixWorld(true);
       _settleBox.setFromObject(f.mesh);
-      const settledY = settlePositionY(_settleBox.min.y, groundY + stackExtra);
+      const settledY = settlePositionY(_settleBox.min.y, groundY + slot.physicalBaseY);
       // Restore current pose — recycle animator owns the lerp.
       f.mesh.position.set(fromX, fromY, fromZ);
       f.mesh.quaternion.set(fromQx, fromQy, fromQz, fromQw);
