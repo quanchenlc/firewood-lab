@@ -15,13 +15,13 @@
       "hdr": "sky/kloofendal_48d_partly_cloudy_puresky/sky_1k.hdr",
       "jpg": "sky/kloofendal_48d_partly_cloudy_puresky/sky_2k.jpg"
     },
-    "ash_veneer_sidegrain": {
-      "diff": "facegrain/sidegrain_diff.jpg",
-      "nor": "facegrain/sidegrain_nor.jpg"
-    },
     "barkedge_cutface": {
       "diff": "facegrain/barkedge_diff.jpg",
       "nor": "facegrain/barkedge_nor.jpg"
+    },
+    "kitchen_wood_sidegrain": {
+      "diff": "facegrain/sidegrain_diff.jpg",
+      "nor": "facegrain/sidegrain_nor.jpg"
     }
   },
   "generatedAt": "2026-09-18T07:45:00.000Z"

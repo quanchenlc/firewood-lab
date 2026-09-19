@@ -44,12 +44,15 @@ const SKIES = [
 
 /**
  * Photographic longitudinal side-grain for cut faces (not procedural sin stripes).
- * ash_veneer grain runs horizontal in source — transpose so V aligns with log height.
+ * kitchen_wood already has strong vertical fibers (V = log height) — no rotate.
+ * Replaces ash_veneer (fine veneer + blur + ×1.18 wash → flat peach at game scale).
  */
 const SIDEGRAIN = {
-  id: 'ash_veneer',
+  id: 'kitchen_wood',
   diffName: 'sidegrain_diff.jpg',
   norName: 'sidegrain_nor.jpg',
+  /** Source grain already runs along V; set true only if a future source is horizontal. */
+  rotate90ccw: false,
 };
 
 const ENDGRAIN_TINTS = {
@@ -159,7 +162,7 @@ function writeEndgrain() {
 }
 
 /**
- * Download ash_veneer + rotate 90° so grain runs along V (log height).
+ * Download kitchen_wood longitudinal grain (already V-aligned).
  * Overwrites facegrain/sidegrain_{diff,nor}.jpg. Retires procedural sin canvas.
  */
 async function pullSidegrain() {
@@ -170,8 +173,8 @@ async function pullSidegrain() {
   if (!diff) throw new Error(`Missing ${SIDEGRAIN.id} Diffuse`);
   const faceDir = join(OUT, 'facegrain');
   mkdirSync(faceDir, { recursive: true });
-  const rawDiff = join(faceDir, '_raw_ash_veneer_diff.jpg');
-  const rawNor = join(faceDir, '_raw_ash_veneer_nor.jpg');
+  const rawDiff = join(faceDir, `_raw_${SIDEGRAIN.id}_diff.jpg`);
+  const rawNor = join(faceDir, `_raw_${SIDEGRAIN.id}_nor.jpg`);
   // Force re-download when regenerating oriented maps.
   for (const p of [rawDiff, rawNor, join(faceDir, SIDEGRAIN.diffName), join(faceDir, SIDEGRAIN.norName)]) {
     try {
@@ -186,22 +189,26 @@ async function pullSidegrain() {
 
   const outDiff = join(faceDir, SIDEGRAIN.diffName);
   const outNor = join(faceDir, SIDEGRAIN.norName);
-  // transpose=2 = 90° CCW — horizontal veneer grain → vertical (V = height).
-  const rot = (src, dest) => {
-    const r = spawnSync('ffmpeg', ['-y', '-i', src, '-vf', 'transpose=2', dest], {
-      encoding: 'utf8',
-    });
-    if (r.status !== 0) {
-      throw new Error(`ffmpeg rotate failed: ${r.stderr || r.stdout}`);
+  const { copyFileSync, readdirSync, unlinkSync } = await import('node:fs');
+  const place = (src, dest) => {
+    if (SIDEGRAIN.rotate90ccw) {
+      // transpose=2 = 90° CCW — horizontal source grain → vertical (V = height).
+      const r = spawnSync('ffmpeg', ['-y', '-i', src, '-vf', 'transpose=2', dest], {
+        encoding: 'utf8',
+      });
+      if (r.status !== 0) {
+        throw new Error(`ffmpeg rotate failed: ${r.stderr || r.stdout}`);
+      }
+    } else {
+      copyFileSync(src, dest);
     }
     console.log('  sidegrain', dest);
   };
-  rot(rawDiff, outDiff);
-  if (existsSync(rawNor)) rot(rawNor, outNor);
+  place(rawDiff, outDiff);
+  if (existsSync(rawNor)) place(rawNor, outNor);
 
   // Drop temps + legacy procedural species facegrain PNGs.
-  const { readdirSync, unlinkSync } = await import('node:fs');
-  for (const name of ['_raw_ash_veneer_diff.jpg', '_raw_ash_veneer_nor.jpg']) {
+  for (const name of [`_raw_${SIDEGRAIN.id}_diff.jpg`, `_raw_${SIDEGRAIN.id}_nor.jpg`]) {
     const p = join(faceDir, name);
     if (existsSync(p)) unlinkSync(p);
   }
@@ -242,7 +249,7 @@ async function main() {
       hdr: 'sky/kloofendal_48d_partly_cloudy_puresky/sky_1k.hdr',
       jpg: 'sky/kloofendal_48d_partly_cloudy_puresky/sky_2k.jpg',
     },
-    ash_veneer_sidegrain: {
+    kitchen_wood_sidegrain: {
       diff: 'facegrain/sidegrain_diff.jpg',
       nor: 'facegrain/sidegrain_nor.jpg',
     },

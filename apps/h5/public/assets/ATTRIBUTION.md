@@ -15,8 +15,8 @@ Each species uses **three photo roles** matching screen.toys/firewood materials
 | top | `endgrain/{species}.png` | Cap end-grain rings |
 
 Per-species insidegrain atlases are built by `scripts/barkedge-atlas.py`
-(species bark strips + shared ash_veneer longitudinal grain). Shared fallback:
-`facegrain/barkedge_{diff,nor}.jpg` (= toona pack).
+(species bark strips + shared kitchen_wood longitudinal grain, contrast-boosted,
+no ×1.18 wash). Shared fallback: `facegrain/barkedge_{diff,nor}.jpg` (= toona pack).
 
 | Local path | Source asset | URL | License |
 |------------|--------------|-----|---------|
@@ -27,9 +27,9 @@ Per-species insidegrain atlases are built by `scripts/barkedge-atlas.py`
 | `bark/eucalyptus-globulus/*` | bark_bluegum | https://polyhaven.com/a/bark_bluegum | CC0 |
 | `bark/toona/*` | chinese_cedar_bark | https://polyhaven.com/a/chinese_cedar_bark | CC0 |
 | `endgrain/*.png` | procedural rings (caps) | (repo script) | CC0-equivalent / project |
-| `facegrain/sidegrain_diff.jpg` | ash_veneer (Diffuse 1K, rotated) | https://polyhaven.com/a/ash_veneer | CC0 |
-| `facegrain/sidegrain_nor.jpg` | ash_veneer (nor_gl 1K, rotated) | https://polyhaven.com/a/ash_veneer | CC0 |
-| `facegrain/{species}/insidegrain_*.jpg` | composite: species bark L/R + ash_veneer mid | Poly Haven (see bark + ash_veneer) | CC0 |
+| `facegrain/sidegrain_diff.jpg` | kitchen_wood (Diffuse 1K, vertical grain) | https://polyhaven.com/a/kitchen_wood | CC0 |
+| `facegrain/sidegrain_nor.jpg` | kitchen_wood (nor_gl 1K) | https://polyhaven.com/a/kitchen_wood | CC0 |
+| `facegrain/{species}/insidegrain_*.jpg` | composite: species bark L/R + kitchen_wood mid | Poly Haven (see bark + kitchen_wood) | CC0 |
 | `facegrain/barkedge_*.jpg` | legacy shared (= toona insidegrain) | same | CC0 |
 | `models/stump/*` | tree_stump_02 | https://polyhaven.com/a/tree_stump_02 | CC0 |
 | `models/axes/hand-axe/*` | hatchet | https://polyhaven.com/a/hatchet | CC0 |
