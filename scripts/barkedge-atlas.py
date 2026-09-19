@@ -6,7 +6,7 @@ Layout mirrors screen.toys insidegrain *roles* (logic only — never their pixel
   U left→right: thin bark strip | longitudinal split grain | thin bark strip
 
 Sources (all CC0 via Poly Haven, already in repo):
-  - Middle grain: facegrain/sidegrain_{diff,nor}.jpg  (ash_veneer, rotated)
+  - Middle grain: facegrain/sidegrain_{diff,nor}.jpg  (kitchen_wood, vertical)
   - Bark edges:   bark/{species}/{diff,nor}.jpg
 
 Output pack layout (drop-in per species):
@@ -45,6 +45,11 @@ SPECIES = [
 BARK_FRAC = 0.03
 SIZE = 1024
 
+# Mid-panel grade: drop over-bright wash; push contrast so vertical fibers read at game scale.
+GRAIN_BRIGHTNESS = 1.0
+GRAIN_CONTRAST = 1.38
+GRAIN_BLUR = 0.0
+
 
 def _load(path: Path) -> Image.Image:
     if not path.exists():
@@ -70,9 +75,13 @@ def _bark_strip(bark: Image.Image, width: int, height: int, *, flip: bool) -> Im
 
 def _grain_panel(grain: Image.Image, width: int, height: int) -> Image.Image:
     g = grain.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
-    # Mild soften so the composite doesn't scream "veneer photo".
-    g = g.filter(ImageFilter.GaussianBlur(radius=0.4))
-    g = ImageEnhance.Brightness(g).enhance(1.18)
+    # Keep fibers sharp — ash_veneer + blur + ×1.18 wash read as flat peach at game scale.
+    if GRAIN_BLUR > 0:
+        g = g.filter(ImageFilter.GaussianBlur(radius=GRAIN_BLUR))
+    if GRAIN_BRIGHTNESS != 1.0:
+        g = ImageEnhance.Brightness(g).enhance(GRAIN_BRIGHTNESS)
+    if GRAIN_CONTRAST != 1.0:
+        g = ImageEnhance.Contrast(g).enhance(GRAIN_CONTRAST)
     return g.resize((width, height), Image.Resampling.LANCZOS)
 
 

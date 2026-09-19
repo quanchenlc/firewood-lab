@@ -1,6 +1,6 @@
 /**
  * @deprecated Procedural sin-stripe facegrain — retired.
- * Cut faces now use photographic Poly Haven ash_veneer via `pull-assets.mjs`
+ * Cut faces now use photographic Poly Haven kitchen_wood via `pull-assets.mjs`
  * → `facegrain/sidegrain_{diff,nor}.jpg`. Kept only so old docs/links don't 404 the module.
  */
 import { deflateSync } from 'node:zlib';
@@ -36,7 +36,7 @@ function chunk(type, data) {
 
 /** @deprecated Prefer Poly Haven sidegrain maps from pull-assets.mjs */
 export function writeFaceGrain(dest, rgb) {
-  console.warn('[facegrain-canvas] deprecated — use assets:pull sidegrain (ash_veneer)');
+  console.warn('[facegrain-canvas] deprecated — use assets:pull sidegrain (kitchen_wood)');
   const size = 512;
   const [br, bg, bb] = rgb;
   const raw = Buffer.alloc(size * size * 3 + size);

@@ -21,7 +21,7 @@
       "license": "CC0",
       "author": "Dimitrios Savva / Poly Haven",
       "endgrain": "Procedural rings (Firewood Lab), tinted for species",
-      "insidegrain": "CC0 bark-edge atlas: pine_bark L/R + ash_veneer grain mid (scripts/barkedge-atlas.py)"
+      "insidegrain": "CC0 bark-edge atlas: pine_bark L/R + kitchen_wood grain mid (scripts/barkedge-atlas.py)"
     }
   },
   {
@@ -46,7 +46,7 @@
       "license": "CC0",
       "author": "Charlotte Baglioni / Poly Haven",
       "endgrain": "Procedural rings (Firewood Lab), tinted for species",
-      "insidegrain": "CC0 bark-edge atlas: jolcham_oak_bark_01 L/R + ash_veneer grain mid"
+      "insidegrain": "CC0 bark-edge atlas: jolcham_oak_bark_01 L/R + kitchen_wood grain mid"
     }
   },
   {
@@ -71,7 +71,7 @@
       "license": "CC0",
       "author": "Charlotte Baglioni / Poly Haven",
       "endgrain": "Procedural rings (Firewood Lab), tinted for species",
-      "insidegrain": "CC0 bark-edge atlas: japanese_cedar_bark L/R + ash_veneer grain mid"
+      "insidegrain": "CC0 bark-edge atlas: japanese_cedar_bark L/R + kitchen_wood grain mid"
     }
   },
   {
@@ -96,7 +96,7 @@
       "license": "CC0",
       "author": "Poly Haven",
       "endgrain": "Procedural rings (Firewood Lab), tinted for species",
-      "insidegrain": "CC0 bark-edge atlas: bark_platanus L/R + ash_veneer grain mid"
+      "insidegrain": "CC0 bark-edge atlas: bark_platanus L/R + kitchen_wood grain mid"
     }
   },
   {
@@ -121,7 +121,7 @@
       "license": "CC0",
       "author": "Dimitrios Savva / Poly Haven",
       "endgrain": "Procedural rings (Firewood Lab), tinted for species",
-      "insidegrain": "CC0 bark-edge atlas: bark_bluegum L/R + ash_veneer grain mid"
+      "insidegrain": "CC0 bark-edge atlas: bark_bluegum L/R + kitchen_wood grain mid"
     }
   },
   {
@@ -146,7 +146,7 @@
       "license": "CC0",
       "author": "Poly Haven",
       "endgrain": "Procedural rings (Firewood Lab), tinted for species",
-      "insidegrain": "CC0 bark-edge atlas: chinese_cedar_bark L/R + ash_veneer grain mid"
+      "insidegrain": "CC0 bark-edge atlas: chinese_cedar_bark L/R + kitchen_wood grain mid"
     }
   }
 ]
