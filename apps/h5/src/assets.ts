@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import type { Axe, Species } from '@firewood/game-core';
 import { assetUrl } from './asset-url';
-import { SIDEGRAIN_DIFF, SIDEGRAIN_NOR } from './cut-face';
+import { SIDEGRAIN_DIFF, SIDEGRAIN_NOR, speciesInsidegrainPaths } from './cut-face';
 import {
   applyStumpOutlineIrregularity,
   STUMP_BOT_RADIUS,
@@ -63,11 +63,19 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
   const maps = species.maps;
   const tint = SIDEGRAIN_TINT[species.id] ?? 0xf0e0d0;
   if (!maps?.barkDiff) {
-    const bark = new THREE.MeshStandardMaterial({ color: 0x8b5a2b, roughness: 0.9 });
-    const end = new THREE.MeshStandardMaterial({ color: 0xd4b896, roughness: 0.92 });
+    const bark = new THREE.MeshStandardMaterial({
+      color: 0x8b5a2b,
+      roughness: 0.9,
+      side: THREE.DoubleSide,
+    });
+    const end = new THREE.MeshStandardMaterial({
+      color: 0xd4b896,
+      roughness: 0.92,
+      side: THREE.DoubleSide,
+    });
     const face = new THREE.MeshStandardMaterial({
       color: tint,
-      roughness: 0.88,
+      roughness: 0.7,
       side: THREE.DoubleSide,
     });
     return {
@@ -83,13 +91,23 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
     };
   }
 
+  const insidePaths = maps.insidegrainDiff
+    ? { diff: maps.insidegrainDiff, nor: maps.insidegrainNor }
+    : speciesInsidegrainPaths(species.id);
+  const faceDiffUrl = insidePaths.diff ?? SIDEGRAIN_DIFF;
+  const faceNorUrl = insidePaths.nor ?? SIDEGRAIN_NOR;
+
   const [diff, nor, rough, endMap, faceMap, faceNor] = await Promise.all([
     loadTexture(maps.barkDiff, THREE.SRGBColorSpace),
     maps.barkNor ? loadTexture(maps.barkNor) : Promise.resolve(null),
     maps.barkRough ? loadTexture(maps.barkRough) : Promise.resolve(null),
     maps.endgrain ? loadTexture(maps.endgrain, THREE.SRGBColorSpace) : Promise.resolve(null),
-    loadTexture(SIDEGRAIN_DIFF, THREE.SRGBColorSpace).catch(() => null),
-    loadTexture(SIDEGRAIN_NOR).catch(() => null),
+    loadTexture(faceDiffUrl, THREE.SRGBColorSpace).catch(() =>
+      loadTexture(SIDEGRAIN_DIFF, THREE.SRGBColorSpace).catch(() => null),
+    ),
+    faceNorUrl
+      ? loadTexture(faceNorUrl).catch(() => loadTexture(SIDEGRAIN_NOR).catch(() => null))
+      : Promise.resolve(null),
   ]);
 
   diff.repeat.set(1.2, 1);
@@ -111,12 +129,16 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
     faceNor.repeat.set(1, 1);
   }
 
+  // Outer bark: photographic albedo+normal, cylindrical UVs, strong bump
+  // (ref outsidebark normalScale≈2). DoubleSide so thin mantle never drops out.
   const bark = new THREE.MeshStandardMaterial({
     map: diff,
     normalMap: nor ?? undefined,
+    normalScale: nor ? new THREE.Vector2(2, 2) : undefined,
     roughnessMap: rough ?? undefined,
     roughness: rough ? 1 : 0.85,
     metalness: 0,
+    side: THREE.DoubleSide,
   });
 
   const endgrain = new THREE.MeshStandardMaterial({
@@ -124,6 +146,7 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
     color: endMap ? 0xffffff : 0xd4b896,
     roughness: 0.92,
     metalness: 0,
+    side: THREE.DoubleSide,
   });
 
   // Cut faces: bark-edge atlas (thin bark L/R + longitudinal grain mid).
@@ -132,7 +155,7 @@ export async function loadSpeciesMaterials(species: Species): Promise<SpeciesMat
     normalMap: faceNor ?? undefined,
     normalScale: faceNor ? new THREE.Vector2(0.35, 0.35) : undefined,
     color: faceMap ? tint : 0xc4a574,
-    roughness: 0.88,
+    roughness: 0.7,
     metalness: 0,
     side: THREE.DoubleSide,
     polygonOffset: true,
@@ -383,6 +406,8 @@ export async function preloadContentAssets(
           first.maps.barkNor,
           first.maps.barkRough,
           first.maps.endgrain,
+          first.maps.insidegrainDiff ?? speciesInsidegrainPaths(first.id).diff,
+          first.maps.insidegrainNor ?? speciesInsidegrainPaths(first.id).nor,
           SIDEGRAIN_DIFF,
           SIDEGRAIN_NOR,
         ]

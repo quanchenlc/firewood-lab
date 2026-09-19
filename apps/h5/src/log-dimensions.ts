@@ -197,6 +197,42 @@ export function applyBarkIrregularity(
 }
 
 /**
+ * Per-log random U offset on the cylindrical mantle (side group only).
+ * Caps keep their own verts/UVs — do not touch endgrain unwrap.
+ * Matches reference `ow` random U shift so bark doesn't tile identically.
+ */
+export function applyRandomMantleUOffset(
+  geo: {
+    groups: Array<{ start: number; count: number; materialIndex?: number }>;
+    index: { getX(i: number): number } | null;
+    getAttribute(name: string): {
+      count: number;
+      getX(i: number): number;
+      setX(i: number, x: number): void;
+      needsUpdate: boolean;
+    } | undefined;
+  },
+  uOffset = Math.random(),
+): number {
+  const uv = geo.getAttribute('uv');
+  const index = geo.index;
+  if (!uv || !index) return uOffset;
+  const side =
+    geo.groups.find((g) => (g.materialIndex ?? 0) === 0) ?? geo.groups[0];
+  if (!side || side.count <= 0) return uOffset;
+  const seen = new Set<number>();
+  const end = side.start + side.count;
+  for (let i = side.start; i < end; i++) {
+    const vi = index.getX(i);
+    if (seen.has(vi)) continue;
+    seen.add(vi);
+    uv.setX(vi, uv.getX(vi) + uOffset);
+  }
+  uv.needsUpdate = true;
+  return uOffset;
+}
+
+/**
  * Same organic outline for the chopping-block cylinder / cut-face disk.
  * - Cylinder (Y-up): radial = hypot(x,z)
  * - CircleGeometry (XY plane, later rotated flat): radial = hypot(x,y)

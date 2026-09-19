@@ -29,6 +29,7 @@ import {
   radialBarkOffsetMetres,
   sampleLogRound,
   samplePlanRadii,
+  applyRandomMantleUOffset,
   type LogRoundDims,
 } from './log-dimensions.ts';
 
@@ -186,5 +187,36 @@ describe('log-dimensions (firewood-scale round)', () => {
     }
     assert.ok(maxTopR < topR * 1.55, `top cap exploded: ${maxTopR} vs ${topR}`);
     assert.ok(maxBotR < botR * 1.55, `bot cap exploded: ${maxBotR} vs ${botR}`);
+  });
+});
+
+describe('applyRandomMantleUOffset', () => {
+  it('offsets side-group U only; leaves cap verts untouched', () => {
+    // Minimal fake: side indices 0,1,2 ; cap indices 3,4,5
+    const u = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+    const geo = {
+      groups: [
+        { start: 0, count: 3, materialIndex: 0 },
+        { start: 3, count: 3, materialIndex: 1 },
+      ],
+      index: { getX(i: number) { return i; } },
+      getAttribute(name: string) {
+        if (name !== 'uv') return undefined;
+        return {
+          count: u.length,
+          getX(i: number) { return u[i]!; },
+          setX(i: number, x: number) { u[i] = x; },
+          needsUpdate: false,
+        };
+      },
+    };
+    const off = applyRandomMantleUOffset(geo, 0.25);
+    assert.equal(off, 0.25);
+    assert.ok(Math.abs(u[0]! - 0.35) < 1e-9);
+    assert.ok(Math.abs(u[1]! - 0.45) < 1e-9);
+    assert.ok(Math.abs(u[2]! - 0.55) < 1e-9);
+    assert.equal(u[3], 0.4);
+    assert.equal(u[4], 0.5);
+    assert.equal(u[5], 0.6);
   });
 });

@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """
-Build a CC0 bark-edge cut-face atlas (screen.toys *style*, not their assets).
+Build CC0 bark-edge (insidegrain) cut-face atlases per species.
 
-Layout (U left→right):
-  A thin bark strip | B longitudinal split grain | C thin bark strip
+Layout mirrors screen.toys insidegrain *roles* (logic only — never their pixels):
+  U left→right: thin bark strip | longitudinal split grain | thin bark strip
 
 Sources (all CC0 via Poly Haven, already in repo):
   - Middle grain: facegrain/sidegrain_{diff,nor}.jpg  (ash_veneer, rotated)
-  - Bark edges:   bark/toona/{diff,nor}.jpg           (chinese_cedar_bark)
+  - Bark edges:   bark/{species}/{diff,nor}.jpg
+
+Output pack layout (drop-in per species):
+  facegrain/{species}/insidegrain_diff.jpg
+  facegrain/{species}/insidegrain_nor.jpg
+
+Also writes legacy shared paths facegrain/barkedge_{diff,nor}.jpg from `toona`
+so older fallbacks keep working.
 
 Do NOT download or remix screen.toys insidegrain.jpg.
 """
@@ -21,7 +28,17 @@ from PIL import Image, ImageEnhance, ImageFilter
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "apps/h5/public/assets"
 FACE = ASSETS / "facegrain"
-BARK = ASSETS / "bark/toona"
+BARK_ROOT = ASSETS / "bark"
+
+# Species ids must match packages/content/data/species.json + bark/ folders.
+SPECIES = [
+    "pinus",
+    "quercus-serrata",
+    "cryptomeria",
+    "platanus",
+    "eucalyptus-globulus",
+    "toona",
+]
 
 # ~3% bark strip each side — matches screen.toys insidegrain *layout* (~2–4%),
 # not their pixels. Wider strips (e.g. 12%) read as thick dark columns on cut faces.
@@ -99,32 +116,69 @@ def build_normal(nor_bark: Image.Image | None, nor_grain: Image.Image | None) ->
     return out
 
 
+def write_pack(
+    species: str,
+    grain_diff: Image.Image,
+    grain_nor: Image.Image | None,
+    out_root: Path,
+) -> tuple[Path, Path]:
+    bark_dir = BARK_ROOT / species
+    bark_diff = _load(bark_dir / "diff.jpg")
+    bark_nor_path = bark_dir / "nor.jpg"
+    bark_nor = _load(bark_nor_path) if bark_nor_path.exists() else None
+
+    atlas = build_atlas(bark_diff, grain_diff)
+    nor = build_normal(bark_nor, grain_nor)
+
+    dest = out_root / species
+    dest.mkdir(parents=True, exist_ok=True)
+    diff_path = dest / "insidegrain_diff.jpg"
+    nor_path = dest / "insidegrain_nor.jpg"
+    atlas.save(diff_path, quality=88, optimize=True)
+    nor.save(nor_path, quality=88, optimize=True)
+    return diff_path, nor_path
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--out-dir",
         type=Path,
         default=FACE,
-        help="Output directory (default: apps/h5/public/assets/facegrain)",
+        help="Output root (default: apps/h5/public/assets/facegrain)",
+    )
+    ap.add_argument(
+        "--species",
+        nargs="*",
+        default=SPECIES,
+        help="Species ids to build (default: all content packs)",
     )
     args = ap.parse_args()
     out_dir: Path = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
     grain_diff = _load(FACE / "sidegrain_diff.jpg")
-    bark_diff = _load(BARK / "diff.jpg")
-    grain_nor = _load(FACE / "sidegrain_nor.jpg") if (FACE / "sidegrain_nor.jpg").exists() else None
-    bark_nor = _load(BARK / "nor.jpg") if (BARK / "nor.jpg").exists() else None
+    grain_nor = (
+        _load(FACE / "sidegrain_nor.jpg") if (FACE / "sidegrain_nor.jpg").exists() else None
+    )
 
-    atlas = build_atlas(bark_diff, grain_diff)
-    nor = build_normal(bark_nor, grain_nor)
+    for sp in args.species:
+        diff_path, nor_path = write_pack(sp, grain_diff, grain_nor, out_dir)
+        print(f"wrote {diff_path} (bark_frac={BARK_FRAC})")
+        print(f"wrote {nor_path}")
 
-    diff_path = out_dir / "barkedge_diff.jpg"
-    nor_path = out_dir / "barkedge_nor.jpg"
-    atlas.save(diff_path, quality=88, optimize=True)
-    nor.save(nor_path, quality=88, optimize=True)
-    print(f"wrote {diff_path} ({atlas.size[0]}x{atlas.size[1]}, bark_frac={BARK_FRAC})")
-    print(f"wrote {nor_path}")
+    # Legacy shared fallback = toona pack (kept for older code paths).
+    if "toona" in args.species:
+        legacy_diff = out_dir / "toona" / "insidegrain_diff.jpg"
+        legacy_nor = out_dir / "toona" / "insidegrain_nor.jpg"
+        if legacy_diff.exists():
+            atlas = Image.open(legacy_diff)
+            atlas.save(out_dir / "barkedge_diff.jpg", quality=88, optimize=True)
+            print(f"wrote {out_dir / 'barkedge_diff.jpg'} (legacy shared)")
+        if legacy_nor.exists():
+            nor = Image.open(legacy_nor)
+            nor.save(out_dir / "barkedge_nor.jpg", quality=88, optimize=True)
+            print(f"wrote {out_dir / 'barkedge_nor.jpg'} (legacy shared)")
 
 
 if __name__ == "__main__":

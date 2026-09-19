@@ -11,7 +11,9 @@
       "barkDiff": "assets/bark/pinus/diff.jpg",
       "barkNor": "assets/bark/pinus/nor.jpg",
       "barkRough": "assets/bark/pinus/rough.jpg",
-      "endgrain": "assets/endgrain/pinus.png"
+      "endgrain": "assets/endgrain/pinus.png",
+      "insidegrainDiff": "assets/facegrain/pinus/insidegrain_diff.jpg",
+      "insidegrainNor": "assets/facegrain/pinus/insidegrain_nor.jpg"
     },
     "attribution": {
       "barkAsset": "pine_bark",
@@ -19,7 +21,7 @@
       "license": "CC0",
       "author": "Dimitrios Savva / Poly Haven",
       "endgrain": "Procedural rings (Firewood Lab), tinted for species",
-      "facegrain": "Poly Haven ash_veneer (CC0), rotated longitudinal side-grain"
+      "insidegrain": "CC0 bark-edge atlas: pine_bark L/R + ash_veneer grain mid (scripts/barkedge-atlas.py)"
     }
   },
   {
@@ -34,7 +36,9 @@
       "barkDiff": "assets/bark/quercus-serrata/diff.jpg",
       "barkNor": "assets/bark/quercus-serrata/nor.jpg",
       "barkRough": "assets/bark/quercus-serrata/rough.jpg",
-      "endgrain": "assets/endgrain/quercus-serrata.png"
+      "endgrain": "assets/endgrain/quercus-serrata.png",
+      "insidegrainDiff": "assets/facegrain/quercus-serrata/insidegrain_diff.jpg",
+      "insidegrainNor": "assets/facegrain/quercus-serrata/insidegrain_nor.jpg"
     },
     "attribution": {
       "barkAsset": "jolcham_oak_bark_01",
@@ -42,7 +46,7 @@
       "license": "CC0",
       "author": "Charlotte Baglioni / Poly Haven",
       "endgrain": "Procedural rings (Firewood Lab), tinted for species",
-      "facegrain": "Poly Haven ash_veneer (CC0), rotated longitudinal side-grain"
+      "insidegrain": "CC0 bark-edge atlas: jolcham_oak_bark_01 L/R + ash_veneer grain mid"
     }
   },
   {
@@ -57,7 +61,9 @@
       "barkDiff": "assets/bark/cryptomeria/diff.jpg",
       "barkNor": "assets/bark/cryptomeria/nor.jpg",
       "barkRough": "assets/bark/cryptomeria/rough.jpg",
-      "endgrain": "assets/endgrain/cryptomeria.png"
+      "endgrain": "assets/endgrain/cryptomeria.png",
+      "insidegrainDiff": "assets/facegrain/cryptomeria/insidegrain_diff.jpg",
+      "insidegrainNor": "assets/facegrain/cryptomeria/insidegrain_nor.jpg"
     },
     "attribution": {
       "barkAsset": "japanese_cedar_bark",
@@ -65,7 +71,7 @@
       "license": "CC0",
       "author": "Charlotte Baglioni / Poly Haven",
       "endgrain": "Procedural rings (Firewood Lab), tinted for species",
-      "facegrain": "Poly Haven ash_veneer (CC0), rotated longitudinal side-grain"
+      "insidegrain": "CC0 bark-edge atlas: japanese_cedar_bark L/R + ash_veneer grain mid"
     }
   },
   {
@@ -80,7 +86,9 @@
       "barkDiff": "assets/bark/platanus/diff.jpg",
       "barkNor": "assets/bark/platanus/nor.jpg",
       "barkRough": "assets/bark/platanus/rough.jpg",
-      "endgrain": "assets/endgrain/platanus.png"
+      "endgrain": "assets/endgrain/platanus.png",
+      "insidegrainDiff": "assets/facegrain/platanus/insidegrain_diff.jpg",
+      "insidegrainNor": "assets/facegrain/platanus/insidegrain_nor.jpg"
     },
     "attribution": {
       "barkAsset": "bark_platanus",
@@ -88,7 +96,7 @@
       "license": "CC0",
       "author": "Poly Haven",
       "endgrain": "Procedural rings (Firewood Lab), tinted for species",
-      "facegrain": "Poly Haven ash_veneer (CC0), rotated longitudinal side-grain"
+      "insidegrain": "CC0 bark-edge atlas: bark_platanus L/R + ash_veneer grain mid"
     }
   },
   {
@@ -103,7 +111,9 @@
       "barkDiff": "assets/bark/eucalyptus-globulus/diff.jpg",
       "barkNor": "assets/bark/eucalyptus-globulus/nor.jpg",
       "barkRough": "assets/bark/eucalyptus-globulus/rough.jpg",
-      "endgrain": "assets/endgrain/eucalyptus-globulus.png"
+      "endgrain": "assets/endgrain/eucalyptus-globulus.png",
+      "insidegrainDiff": "assets/facegrain/eucalyptus-globulus/insidegrain_diff.jpg",
+      "insidegrainNor": "assets/facegrain/eucalyptus-globulus/insidegrain_nor.jpg"
     },
     "attribution": {
       "barkAsset": "bark_bluegum",
@@ -111,7 +121,7 @@
       "license": "CC0",
       "author": "Dimitrios Savva / Poly Haven",
       "endgrain": "Procedural rings (Firewood Lab), tinted for species",
-      "facegrain": "Poly Haven ash_veneer (CC0), rotated longitudinal side-grain"
+      "insidegrain": "CC0 bark-edge atlas: bark_bluegum L/R + ash_veneer grain mid"
     }
   },
   {
@@ -126,7 +136,9 @@
       "barkDiff": "assets/bark/toona/diff.jpg",
       "barkNor": "assets/bark/toona/nor.jpg",
       "barkRough": "assets/bark/toona/rough.jpg",
-      "endgrain": "assets/endgrain/toona.png"
+      "endgrain": "assets/endgrain/toona.png",
+      "insidegrainDiff": "assets/facegrain/toona/insidegrain_diff.jpg",
+      "insidegrainNor": "assets/facegrain/toona/insidegrain_nor.jpg"
     },
     "attribution": {
       "barkAsset": "chinese_cedar_bark",
@@ -134,7 +146,7 @@
       "license": "CC0",
       "author": "Poly Haven",
       "endgrain": "Procedural rings (Firewood Lab), tinted for species",
-      "facegrain": "Poly Haven ash_veneer (CC0), rotated longitudinal side-grain"
+      "insidegrain": "CC0 bark-edge atlas: chinese_cedar_bark L/R + ash_veneer grain mid"
     }
   }
 ]

@@ -14,6 +14,7 @@ import {
   cutCapAxesFromCleave,
   cutFaceCoverageRatio,
   cutTriAreaInPlane,
+  cutVertsSharedWithExterior,
   estimateChordCover,
   fanTriangulateContour,
   hasReclassifiedInnerSlot,
@@ -21,6 +22,7 @@ import {
   projectionSpan,
   roughCutOffset,
   shouldSealCutFace,
+  speciesInsidegrainPaths,
 } from './cut-face.ts';
 
 describe('classifyFaceNormal', () => {
@@ -211,6 +213,26 @@ describe('hasReclassifiedInnerSlot', () => {
 
   it('two-slot pinata [bark, inner] is false (handled by groups.length===2)', () => {
     assert.equal(hasReclassifiedInnerSlot([bark, inner], inner), false);
+  });
+});
+
+describe('cutVertsSharedWithExterior', () => {
+  it('lists only cut verts also referenced by exterior', () => {
+    const exterior = new Set([0, 1, 2, 5]);
+    const shared = cutVertsSharedWithExterior([1, 3, 5, 7], exterior);
+    assert.deepEqual(shared, [1, 5]);
+  });
+
+  it('empty when cut face is fully interior (no weld)', () => {
+    assert.deepEqual(cutVertsSharedWithExterior([10, 11, 12], new Set([0, 1])), []);
+  });
+});
+
+describe('speciesInsidegrainPaths', () => {
+  it('uses drop-in facegrain/{id}/insidegrain_* pack layout', () => {
+    const p = speciesInsidegrainPaths('pinus');
+    assert.equal(p.diff, 'assets/facegrain/pinus/insidegrain_diff.jpg');
+    assert.equal(p.nor, 'assets/facegrain/pinus/insidegrain_nor.jpg');
   });
 });
 
