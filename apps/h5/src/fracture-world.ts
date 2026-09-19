@@ -54,6 +54,7 @@ import {
   classifyFaceNormal,
   cutFaceCoverageRatio,
   cutTriAreaInPlane,
+  cutVertsSharedWithExterior,
   estimateChordCover,
   fanTriangulateContour,
   hasReclassifiedInnerSlot,
@@ -613,9 +614,115 @@ export function createFractureWorld(
   }
 
   /**
+   * Duplicate cut-group verts that are still welded to exterior (bark /
+   * endgrain) tris. Retargets cut-group indices to the copies and assigns
+   * hard-edge cut normals. Exterior UVs / normals stay untouched.
+   *
+   * Returns remapped cut verts plus the new rim-copy indices (skip micro-
+   * displacement on those so the bark edge stays flush).
+   */
+  function splitSharedCutVertsHardEdge(
+    mesh: DestructibleMesh,
+    cutVerts: Set<number>,
+    localN: THREE.Vector3,
+    planeD: number | null,
+  ): { cutVerts: Set<number>; rimCopies: Set<number> } {
+    const emptyRim = new Set<number>();
+    const geo = mesh.geometry;
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const uvAttr = geo.attributes.uv as THREE.BufferAttribute | undefined;
+    const norAttr = geo.attributes.normal as THREE.BufferAttribute | undefined;
+    const index = geo.index;
+    if (!index || !uvAttr || cutVerts.size === 0) {
+      return { cutVerts: new Set(cutVerts), rimCopies: emptyRim };
+    }
+
+    const exterior = new Set<number>();
+    for (const g of geo.groups) {
+      if ((g.materialIndex ?? 0) === 1) continue;
+      const end = g.start + g.count;
+      for (let i = g.start; i < end; i++) exterior.add(index.getX(i));
+    }
+    const shared = cutVertsSharedWithExterior(cutVerts, exterior);
+    if (shared.length === 0) {
+      return { cutVerts: new Set(cutVerts), rimCopies: emptyRim };
+    }
+
+    // Outward cut normal (same convention as appendContourCutSeal).
+    let d = planeD;
+    const tmp = new THREE.Vector3();
+    if (d === null) {
+      let sum = 0;
+      let n = 0;
+      for (const vi of cutVerts) {
+        tmp.fromBufferAttribute(pos, vi);
+        sum += tmp.dot(localN);
+        n++;
+      }
+      d = n > 0 ? sum / n : 0;
+    }
+    mesh.updateMatrixWorld(true);
+    const localCenter = mesh.worldToLocal(
+      new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3()),
+    );
+    const sideSign = Math.sign(localN.dot(localCenter) - d) || 1;
+    const ox = -sideSign * localN.x;
+    const oy = -sideSign * localN.y;
+    const oz = -sideSign * localN.z;
+
+    const posArr = Array.from(pos.array as ArrayLike<number>);
+    const uvArr = Array.from(uvAttr.array as ArrayLike<number>);
+    const norArr = norAttr
+      ? Array.from(norAttr.array as ArrayLike<number>)
+      : null;
+    const remap = new Map<number, number>();
+    const rimCopies = new Set<number>();
+    for (const src of shared) {
+      const xi = pos.getX(src);
+      const yi = pos.getY(src);
+      const zi = pos.getZ(src);
+      const newIndex = posArr.length / 3;
+      posArr.push(xi, yi, zi);
+      // Keep a copy of the old UV until CASE write replaces it on the cut copy.
+      uvArr.push(uvAttr.getX(src), uvAttr.getY(src));
+      if (norArr) norArr.push(ox, oy, oz);
+      remap.set(src, newIndex);
+      rimCopies.add(newIndex);
+    }
+
+    // Retarget cut-group index slots only — exterior keeps original verts.
+    const idxArr = Array.from(index.array as ArrayLike<number>);
+    for (const g of geo.groups) {
+      if ((g.materialIndex ?? 0) !== 1) continue;
+      const end = g.start + g.count;
+      for (let i = g.start; i < end; i++) {
+        const mapped = remap.get(idxArr[i]!);
+        if (mapped !== undefined) idxArr[i] = mapped;
+      }
+    }
+
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvArr, 2));
+    if (norArr) {
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(norArr, 3));
+    }
+    geo.setIndex(idxArr);
+
+    const out = new Set<number>();
+    for (const vi of cutVerts) {
+      out.add(remap.get(vi) ?? vi);
+    }
+    return { cutVerts: out, rimCopies };
+  }
+
+  /**
    * After three-pinata slice (2 materials): aspect-correct cut UVs + reclassify
    * tris into bark / endgrain / inner side-grain so caps keep rings and the
    * outer mantle keeps bark (cut faces come from pinata group 1 only).
+   *
+   * SIDE TEXTURE invariant: outer bark mantle UVs are never rewritten — only
+   * cut-only verts receive CASE A/B/C insidegrain UVs (shared rim verts are
+   * duplicated first via splitSharedCutVertsHardEdge).
    */
   function repairCutFace(
     mesh: DestructibleMesh,
@@ -678,8 +785,19 @@ export function createFractureWorld(
         }
         cutVerts.add(vi);
       }
-      // Fallback: if plane filter culled everything (e.g. matrix quirk), keep full cut group.
-      if (cutVerts.size < 3) {
+      // CASE2: only verts on this cleave. If the tight filter culls everything,
+      // loosen epsilon once — never fall back to remapping the entire cut group
+      // (that would rewrite prior inner / shared bark UVs).
+      if (cutVerts.size < 3 && planeD !== null) {
+        for (let i = pinataCut.start; i < end; i++) {
+          const vi = index.getX(i);
+          tmp.fromBufferAttribute(pos, vi);
+          if (Math.abs(tmp.dot(localN) - planeD) > 0.08) continue;
+          cutVerts.add(vi);
+        }
+      }
+      // Still sparse with no planeD: take current cut group (first chop).
+      if (cutVerts.size < 3 && planeD === null) {
         for (let i = pinataCut.start; i < end; i++) cutVerts.add(index.getX(i));
       }
     }
@@ -738,6 +856,8 @@ export function createFractureWorld(
     let faceUMax = 1;
     let faceVMin = 0;
     let faceVMax = 1;
+    /** Hard-edge rim copies — skip micro-displacement to keep bark flush. */
+    const rimCopyVerts = new Set<number>();
 
     if (cutVerts.size >= 3) {
       let uMin = Infinity;
@@ -781,10 +901,21 @@ export function createFractureWorld(
       );
       chordCover = estimateChordCover(faceChord, fullChordGuess);
 
+      // Hard-edge split: duplicate cut verts still welded to bark/endgrain so
+      // CASE UVs never overwrite outer mantle cylindrical UVs (ref: outer side
+      // UVs are copied/preserved; only inner gets insidegrain atlas).
+      const split = splitSharedCutVertsHardEdge(mesh, cutVerts, localN, planeD);
+      cutVerts.clear();
+      for (const vi of split.cutVerts) cutVerts.add(vi);
+      for (const vi of split.rimCopies) rimCopyVerts.add(vi);
+
       // CASE1: bark-edge atlas UV with A/B/C window; V bottom→top.
       // CASE2: planeD filter above already skipped older cut verts so their UVs stay.
+      // Refresh attrs — split may have replaced buffers.
+      const posNow = geo.attributes.position as THREE.BufferAttribute;
+      const uvNow = geo.attributes.uv as THREE.BufferAttribute;
       for (const vi of cutVerts) {
-        tmp.fromBufferAttribute(pos, vi);
+        tmp.fromBufferAttribute(posNow, vi);
         const mapped = barkEdgeCutUv(
           tmp.dot(tangent),
           tmp.dot(bitangent),
@@ -793,18 +924,21 @@ export function createFractureWorld(
           vMin,
           vMax,
         );
-        uvAttr.setXY(
+        uvNow.setXY(
           vi,
           applyBarkEdgeCaseU(mapped.u, barkCase, chordCover),
           mapped.v,
         );
       }
-      uvAttr.needsUpdate = true;
+      uvNow.needsUpdate = true;
     }
 
     // Coverage of pinata cut tris vs expected cleave rectangle (for optional seal skip).
     let coverageRatio: number | undefined;
     if (pinataCut && pinataCut.count >= 3) {
+      // Split may have replaced position/index buffers — re-read.
+      const posCov = geo.attributes.position as THREE.BufferAttribute;
+      const indexCov = geo.index!;
       mesh.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(mesh);
       const size = box.getSize(new THREE.Vector3());
@@ -814,17 +948,17 @@ export function createFractureWorld(
       let area = 0;
       const end = pinataCut.start + pinataCut.count;
       for (let i = pinataCut.start; i + 2 < end; i += 3) {
-        const i0 = index.getX(i);
-        const i1 = index.getX(i + 1);
-        const i2 = index.getX(i + 2);
+        const i0 = indexCov.getX(i);
+        const i1 = indexCov.getX(i + 1);
+        const i2 = indexCov.getX(i + 2);
         // Only count tris whose verts lie on this cleave (CASE1 / new plane).
         if (planeD !== null) {
-          a.fromBufferAttribute(pos, i0);
+          a.fromBufferAttribute(posCov, i0);
           if (Math.abs(a.dot(localN) - planeD) > 0.03) continue;
         }
-        a.fromBufferAttribute(pos, i0);
-        b.fromBufferAttribute(pos, i1);
-        c.fromBufferAttribute(pos, i2);
+        a.fromBufferAttribute(posCov, i0);
+        b.fromBufferAttribute(posCov, i1);
+        c.fromBufferAttribute(posCov, i2);
         area += cutTriAreaInPlane(
           a.x, a.y, a.z,
           b.x, b.y, b.z,
@@ -867,7 +1001,7 @@ export function createFractureWorld(
     }
 
     // Light deterministic rough-cut micro-displacement on interior fill verts.
-    applyRoughCutDisplacement(mesh, localN, planeD, cutVerts);
+    applyRoughCutDisplacement(mesh, localN, planeD, cutVerts, rimCopyVerts);
 
     // Reclassify every triangle → bark / endgrain / inner (3 materials).
     reclassifyPieceMaterials(mesh, planeNormal, mats);
@@ -1065,14 +1199,16 @@ export function createFractureWorld(
 
   /**
    * Tiny deterministic displacement along cut normal for interior cut-face
-   * verts only (pinata fill). Skips exterior-shared rim verts and does not
-   * walk newly sealed contour copies — keeps the bark edge flush.
+   * verts only (pinata fill). Skips exterior-shared rim verts, hard-edge rim
+   * copies, and does not walk newly sealed contour copies — keeps the bark
+   * edge flush.
    */
   function applyRoughCutDisplacement(
     mesh: DestructibleMesh,
     localN: THREE.Vector3,
     _planeD: number | null,
     seedCutVerts: Set<number>,
+    skipVerts?: Set<number>,
   ): void {
     const geo = mesh.geometry;
     const pos = geo.attributes.position as THREE.BufferAttribute | undefined;
@@ -1087,6 +1223,7 @@ export function createFractureWorld(
     }
     for (const vi of seedCutVerts) {
       if (exterior.has(vi)) continue;
+      if (skipVerts?.has(vi)) continue;
       const off = roughCutOffset(vi, 0.0008);
       tmp.fromBufferAttribute(pos, vi);
       tmp.addScaledVector(localN, off);

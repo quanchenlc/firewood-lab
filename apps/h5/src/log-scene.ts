@@ -18,6 +18,7 @@ import {
   CAM_LOOK_AT_Y,
   CAM_RADIUS,
   applyBarkIrregularity,
+  applyRandomMantleUOffset,
   camLookAtY,
   sampleLogRound,
   type LogRoundDims,
@@ -93,6 +94,8 @@ function buildLogGeometry(dims: LogRoundDims): THREE.BufferGeometry {
   // 32×8 matches reference `ow` density so bark + plan lobes read in silhouette.
   const geo = new THREE.CylinderGeometry(dims.radiusTop, dims.radiusBot, dims.height, 32, 8);
   applyBarkIrregularity(geo, dims);
+  // Per-log random mantle U offset (cylindrical bark wrap) — caps untouched.
+  applyRandomMantleUOffset(geo);
   return geo;
 }
 

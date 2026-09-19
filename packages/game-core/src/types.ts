@@ -13,12 +13,20 @@ export interface Species {
   provenance: string;
   /** Learn-while-chopping tip. */
   tip: string;
-  /** Optional H5 material pack paths (public URL). */
+  /** Optional H5 material pack paths (public URL).
+   * Three photo roles (ref outsidebark / insidegrain / top — CC0 only):
+   *   bark*     = cylindrical outer bark (outsidebark)
+   *   endgrain  = cap rings (top)
+   *   insidegrain* = cut-face bark-edge atlas (insidegrain)
+   */
   maps?: {
     barkDiff: string;
     barkNor?: string;
     barkRough?: string;
     endgrain?: string;
+    /** Longitudinal split grain + thin bark L/R (CASE A/B/C atlas). */
+    insidegrainDiff?: string;
+    insidegrainNor?: string;
   };
   attribution?: Record<string, string>;
 }

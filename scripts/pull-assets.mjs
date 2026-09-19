@@ -250,6 +250,14 @@ async function main() {
       diff: 'facegrain/barkedge_diff.jpg',
       nor: 'facegrain/barkedge_nor.jpg',
     },
+    insidegrain_packs: {
+      pinus: 'facegrain/pinus/insidegrain_diff.jpg',
+      'quercus-serrata': 'facegrain/quercus-serrata/insidegrain_diff.jpg',
+      cryptomeria: 'facegrain/cryptomeria/insidegrain_diff.jpg',
+      platanus: 'facegrain/platanus/insidegrain_diff.jpg',
+      'eucalyptus-globulus': 'facegrain/eucalyptus-globulus/insidegrain_diff.jpg',
+      toona: 'facegrain/toona/insidegrain_diff.jpg',
+    },
   };
   writeFileSync(
     join(OUT, 'manifest.json'),
