@@ -1,6 +1,6 @@
 {
   "models": {
-    "tree_stump_02": "models/stump/tree_stump_02_1k.gltf",
+    "log_chopping_stump": "models/stump/log_chopping_stump.glb",
     "hatchet": "models/axes/hand-axe/hatchet_1k.gltf",
     "wooden_axe": "models/axes/nordic-splitting-axe/wooden_axe_1k.gltf",
     "wooden_axe_03": "models/axes/camp-axe/wooden_axe_03_1k.gltf",

@@ -86,7 +86,8 @@ export interface LogScene {
 /**
  * Fracture proxy: low-poly cylinder (Voronoi/slice-friendly).
  * Rest pose is upright — cut face up, axis near world +Y (like screen.toys/firewood).
- * Visual stump is a separate dense GLB underneath — too heavy to fracture directly (~33k verts).
+ * Visual stump is a separate scanned GLB underneath — too heavy to fracture directly.
+ * Scene uses a PBR cylinder proxy as the choppable round, aligned on the stump top.
  * Dimensions: see `log-dimensions.ts` — resampled each round (height / radius / bark).
  */
 function buildLogGeometry(dims: LogRoundDims): THREE.BufferGeometry {

@@ -4,12 +4,7 @@ import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import type { Axe, Species } from '@firewood/game-core';
 import { assetUrl } from './asset-url';
 import { SIDEGRAIN_DIFF, SIDEGRAIN_NOR, speciesInsidegrainPaths } from './cut-face';
-import {
-  applyStumpOutlineIrregularity,
-  STUMP_BOT_RADIUS,
-  STUMP_HEIGHT,
-  STUMP_TOP_RADIUS,
-} from './log-dimensions';
+import { STUMP_HEIGHT, STUMP_TOP_RADIUS } from './log-dimensions';
 
 /** Mild albedo tint so shared bark-edge cut atlas reads per-species (keep pale). */
 const SIDEGRAIN_TINT: Record<string, number> = {
@@ -207,9 +202,8 @@ export function normalizeModel(root: THREE.Object3D, maxSize: number): THREE.Obj
 }
 
 /**
- * Chopping-block stump (劈柴台): flat cut top + bark cylinder.
- * Poly Haven tree_stump_02 is a wide root mound — wrong silhouette for
- * screen.toys/firewood — so we reuse its CC0 PBR maps on a block mesh.
+ * Chopping-block stump (劈柴台): scanned flat-top chopping stump GLB.
+ * Prefer Blendkit CC0 “Log Chopping Stump” family — not Poly Haven’s root mound.
  */
 export interface PlantedStump {
   root: THREE.Object3D;
@@ -221,98 +215,83 @@ export interface PlantedStump {
   height: number;
 }
 
-const STUMP_TEX = {
-  diff: 'assets/models/stump/textures/tree_stump_02_diff_1k.jpg',
-  nor: 'assets/models/stump/textures/tree_stump_02_nor_gl_1k.jpg',
-  arm: 'assets/models/stump/textures/tree_stump_02_arm_1k.jpg',
-};
+/** Scanned CC0 chopping stump (Blendkit Log Chopping Stump 2, 1K PBR). */
+export const CHOPPING_STUMP_GLB = 'assets/models/stump/log_chopping_stump.glb';
 
-/** Build a flat-top chopping block; `stumpModel` is kept only as a texture donor (optional). */
-export async function buildChoppingBlock(
-  _stumpModel?: THREE.Object3D,
+/**
+ * Load + plant the scanned chopping stump under the log.
+ * Scales so top height ≈ STUMP_HEIGHT and plan radius ≈ STUMP_TOP_RADIUS
+ * (mild non-uniform OK — keeps prior rest Y and log seating).
+ */
+export async function plantChoppingStump(
+  url: string = CHOPPING_STUMP_GLB,
 ): Promise<PlantedStump> {
-  const [diff, nor, arm] = await Promise.all([
-    loadTexture(STUMP_TEX.diff, THREE.SRGBColorSpace),
-    loadTexture(STUMP_TEX.nor).catch(() => null),
-    loadTexture(STUMP_TEX.arm).catch(() => null),
-  ]);
-  // Bark around the mantle — enough U wraps so grain reads as bark, not smear.
-  diff.wrapS = diff.wrapT = THREE.RepeatWrapping;
-  diff.repeat.set(1.8, 1.15);
-  if (nor) {
-    nor.wrapS = nor.wrapT = THREE.RepeatWrapping;
-    nor.repeat.copy(diff.repeat);
-  }
-  if (arm) {
-    // Poly Haven ARM: G=roughness. Keep wrap/offset matched to albedo.
-    arm.wrapS = arm.wrapT = THREE.RepeatWrapping;
-    arm.repeat.copy(diff.repeat);
-  }
-
-  const barkMat = new THREE.MeshStandardMaterial({
-    map: diff,
-    normalMap: nor ?? undefined,
-    // Soften bump so daylight doesn't read as shiny plastic bark.
-    normalScale: nor ? new THREE.Vector2(0.5, 0.5) : undefined,
-    roughnessMap: arm ?? undefined,
-    roughness: 1,
-    metalness: 0,
-    color: 0xf2ebe0,
-  });
-  // Flat sawn face — end-grain rings so the chopping face reads clearly.
-  const endMap = await loadTexture('assets/endgrain/toona.png', THREE.SRGBColorSpace).catch(
-    () => null,
-  );
-  if (endMap) {
-    endMap.wrapS = endMap.wrapT = THREE.ClampToEdgeWrapping;
-    endMap.repeat.set(1, 1);
-  }
-  const cutMat = new THREE.MeshStandardMaterial({
-    map: endMap ?? undefined,
-    // Warm sandy end-grain (not pure white → less plastic specular).
-    color: endMap ? 0xf5ead4 : 0xc9a978,
-    roughness: 0.95,
-    metalness: 0,
-  });
-  // Bottom sits on yard ground — dark bark, never a bright endgrain disk.
-  const bottomMat = barkMat.clone();
-  bottomMat.color = new THREE.Color(0x5a4030);
-
-  // Sized for the choppable round in `log-dimensions.ts` (stump top > max log + bark).
-  // Organic silhouette (not a clean cylinder) — same plan-noise family as the log.
-  const TOP_R = STUMP_TOP_RADIUS;
-  const BOT_R = STUMP_BOT_RADIUS;
-  const HEIGHT = STUMP_HEIGHT;
-  const stumpSeed = 41;
-  const stumpAmpIn = 0.3;
-
+  const model = await loadGltf(url);
   const root = new THREE.Group();
   root.name = 'chopping-block';
 
-  /**
-   * One closed cylinder (side / top / bottom groups) — solid stump.
-   * Avoids openEnded hollow shells (read as exploded bark on mobile) and a
-   * separate CircleGeometry top (could desync from the mantle outline).
-   * No Torus rim, no packed-earth pad.
-   * Material groups: 0=side bark, 1=top endgrain, 2=bottom.
-   */
-  const bodyGeo = new THREE.CylinderGeometry(TOP_R, BOT_R, HEIGHT, 40, 5, false);
-  applyStumpOutlineIrregularity(bodyGeo, {
-    height: HEIGHT,
-    seed: stumpSeed,
-    ampIn: stumpAmpIn,
-    refRadiusTop: TOP_R,
-    refRadiusBot: BOT_R,
-  });
-  const body = new THREE.Mesh(bodyGeo, [barkMat, cutMat, bottomMat]);
-  body.name = 'chopping-block-body';
-  body.position.y = HEIGHT * 0.5;
-  body.castShadow = true;
-  body.receiveShadow = true;
-  root.add(body);
+  // Natural size before planting (glTF Y-up).
+  model.updateMatrixWorld(true);
+  const nat = new THREE.Box3().setFromObject(model);
+  const natSize = nat.getSize(new THREE.Vector3());
+  const h = Math.max(natSize.y, 1e-4);
+  const halfXZ = 0.5 * Math.max(natSize.x, natSize.z, 1e-4);
 
-  const topY = HEIGHT;
-  return { root, topY, topRadius: TOP_R, height: HEIGHT };
+  // Hit prior stump top Y + seating radius used by log / collider.
+  const scaleY = STUMP_HEIGHT / h;
+  const scaleXZ = STUMP_TOP_RADIUS / halfXZ;
+  model.scale.set(scaleXZ, scaleY, scaleXZ);
+  model.updateMatrixWorld(true);
+
+  // Bottom on ground (y=0), XZ centered on origin.
+  const box = new THREE.Box3().setFromObject(model);
+  model.position.x -= (box.min.x + box.max.x) * 0.5;
+  model.position.z -= (box.min.z + box.max.z) * 0.5;
+  model.position.y -= box.min.y;
+
+  model.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) {
+      const std = mat as THREE.MeshStandardMaterial;
+      if (!std?.isMeshStandardMaterial) continue;
+      // Scanned albedo already carries bark / cut-top variation.
+      std.metalness = 0;
+      if (std.roughness < 0.7) std.roughness = 0.85;
+    }
+  });
+  // Stable name for shadow / debug probes (first mesh only).
+  let namedBody = false;
+  model.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (namedBody || !mesh.isMesh) return;
+    mesh.name = 'chopping-block-body';
+    namedBody = true;
+  });
+
+  root.add(model);
+  root.updateMatrixWorld(true);
+  const planted = new THREE.Box3().setFromObject(root);
+  const topY = planted.max.y;
+  const topRadius = Math.max(
+    Math.abs(planted.min.x),
+    Math.abs(planted.max.x),
+    Math.abs(planted.min.z),
+    Math.abs(planted.max.z),
+    STUMP_TOP_RADIUS * 0.9,
+  );
+
+  return { root, topY, topRadius, height: Math.max(topY - planted.min.y, STUMP_HEIGHT * 0.9) };
+}
+
+/** @deprecated Use plantChoppingStump — kept as a thin alias for call sites. */
+export async function buildChoppingBlock(
+  _stumpModel?: THREE.Object3D,
+): Promise<PlantedStump> {
+  return plantChoppingStump();
 }
 
 /** Lean outdoor ground + daytime sky (Poly Haven CC0, mobile-friendly). */
@@ -372,9 +351,7 @@ export async function preloadContentAssets(
 
   tasks.push(async () => {
     onProgress(0.05, '劈柴台…');
-    // Warm donor GLB (CC0 maps live under models/stump/textures), then build block mesh.
-    await loadGltf('assets/models/stump/tree_stump_02_1k.gltf').catch(() => null);
-    choppingBlock = await buildChoppingBlock();
+    choppingBlock = await plantChoppingStump();
   });
 
   tasks.push(async () => {

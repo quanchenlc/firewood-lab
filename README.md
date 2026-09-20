@@ -69,14 +69,14 @@ scripts/pull-assets.mjs  # 从 Poly Haven API 拉取 1K 贴图与 GLTF
 | 用途 | 来源 | 许可 |
 |------|------|------|
 | 6 种树皮 PBR（diff/nor/rough 1K） | Poly Haven bark packs | CC0 |
-| 树桩 GLTF `tree_stump_02` | Poly Haven | CC0 |
+| 劈柴台扫描 GLB `log_chopping_stump` | Blendkit「Log Chopping Stump 2」（Joshua Whitney） | CC0 |
 | 斧头 GLTF（hatchet / wooden_axe / wooden_axe_03 / sledgehammer_01） | Poly Haven | CC0 |
 | 地面 `forest_ground_04` | Poly Haven | CC0 |
 | 天空 HDRI `kloofendal_48d_partly_cloudy_puresky`（1K HDR + 2K JPG） | Poly Haven | CC0 |
 | 断面年轮（端盖） | 仓库脚本生成 | 项目自有 |
 | 劈面纵纹（切面） | 仓库脚本生成 | 项目自有 |
 
-**碎裂代理：** 真实 stump GLB 约 3 万顶点，不适合实时 Voronoi；场景用 **PBR 圆柱 proxy** 作为可劈裂木头，下方对齐展示 stump 模型。
+**碎裂代理：** 扫描劈柴桩 GLB（约 1 万顶点）仅作场景展示；可劈裂木头仍用 **PBR 圆柱 proxy**，落在桩顶。
 
 ## 碎裂方案（H5）
 
