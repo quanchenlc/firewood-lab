@@ -5,6 +5,7 @@ import type { Axe, Species } from '@firewood/game-core';
 import { assetUrl } from './asset-url';
 import { SIDEGRAIN_DIFF, SIDEGRAIN_NOR, speciesInsidegrainPaths } from './cut-face';
 import { STUMP_HEIGHT, STUMP_TOP_RADIUS } from './log-dimensions';
+import { flattenStumpTopToPlane } from './stump-flat-top';
 
 /** Mild albedo tint so shared bark-edge cut atlas reads per-species (keep pale). */
 const SIDEGRAIN_TINT: Record<string, number> = {
@@ -220,42 +221,13 @@ export interface PlantedStump {
 /** Default scanned CC0 chopping stump (Blendkit Log Chopping Stump 2). */
 export const CHOPPING_STUMP_GLB = 'assets/models/stump/log_chopping_stump.glb';
 
-/**
- * Subtle horizontal seating plane so the choppable log rests flush.
- * Warm end-grain map + high roughness — not a bright plastic disc.
- */
-async function makeSeatingDisc(radius: number): Promise<THREE.Mesh> {
-  const endMap = await loadTexture('assets/endgrain/toona.png', THREE.SRGBColorSpace).catch(
-    () => null,
-  );
-  if (endMap) {
-    endMap.wrapS = endMap.wrapT = THREE.ClampToEdgeWrapping;
-    endMap.repeat.set(1, 1);
-  }
-  const mat = new THREE.MeshStandardMaterial({
-    map: endMap ?? undefined,
-    // Dusty sawn wood — slightly darker than bare endgrain so it nests into bark.
-    color: endMap ? 0xd8c4a0 : 0xa88b62,
-    roughness: 0.97,
-    metalness: 0,
-    // Soften so the disc reads as wood, not a UI chip.
-    transparent: true,
-    opacity: 0.92,
-    depthWrite: true,
-  });
-  // Thin cylinder (not a zero-thickness plane) so contact shadows stay readable.
-  const geo = new THREE.CylinderGeometry(radius, radius * 0.98, 0.012, 48, 1, false);
-  const disc = new THREE.Mesh(geo, mat);
-  disc.name = 'chopping-block-seat';
-  disc.castShadow = false;
-  disc.receiveShadow = true;
-  return disc;
-}
+export { flattenStumpTopToPlane } from './stump-flat-top';
 
 /**
  * Load + plant a scanned chopping stump under the log.
  * Scales so top height ≈ STUMP_HEIGHT and plan radius ≈ STUMP_TOP_RADIUS
- * (larger footprint than the prior 0.34 m top), then adds a level seating face.
+ * (larger footprint than the prior 0.34 m top), then flattens the mesh top
+ * itself into a horizontal cut face for flush log seating.
  */
 export async function plantChoppingStump(
   url: string = CHOPPING_STUMP_GLB,
@@ -310,21 +282,13 @@ export async function plantChoppingStump(
 
   root.add(model);
   root.updateMatrixWorld(true);
-  const planted = new THREE.Box3().setFromObject(root);
-  // Sink irregular peaks a few mm under the seating plane so the log sits flush.
-  const seatY = STUMP_HEIGHT;
-  const peak = planted.max.y;
-  if (peak > seatY + 0.002) {
-    model.position.y -= peak - seatY + 0.004;
-  }
 
-  const seat = await makeSeatingDisc(STUMP_TOP_RADIUS * 0.92);
-  seat.position.y = seatY - 0.006;
-  root.add(seat);
+  // Mesh top itself becomes the flat chopping plane (no separate pad/disc).
+  const topY = STUMP_HEIGHT;
+  flattenStumpTopToPlane(root, topY);
 
   root.updateMatrixWorld(true);
   const finalBox = new THREE.Box3().setFromObject(root);
-  const topY = seatY;
   const topRadius = Math.max(
     Math.abs(finalBox.min.x),
     Math.abs(finalBox.max.x),

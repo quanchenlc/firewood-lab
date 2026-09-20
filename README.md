@@ -54,7 +54,7 @@ packages/content/        # species.json / axes.json / stumps.json（含 maps、m
 scripts/pull-assets.mjs  # 从 Poly Haven API 拉取 1K 贴图与 GLTF
 ```
 
-玩法补充：左侧 **墩** 芯片可切换 5 套 CC0 劈柴墩；每开新一轮也会随机换墩。墩足径加大，顶面有水平木色承台，原木贴合落座。
+玩法补充：左侧 **墩** 芯片可切换 5 套 CC0 劈柴墩；每开新一轮也会随机换墩。墩足径加大，网格顶面本身压成水平切面，原木贴合落座（无独立承台盘）。
 
 ## 资源与许可
 
