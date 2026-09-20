@@ -46,7 +46,7 @@ no ×1.18 wash). Shared fallback: `facegrain/barkedge_{diff,nor}.jpg` (= toona p
 Chopping stump packs (all **CC0**, listed in `packages/content/data/stumps.json`):
 H5 left-edge **墩** chip cycles packs; each full round also auto-picks a random pack.
 Only upright chopping-block-like scans are shipped (sideways / root-mound / thin packs
-removed). Each GLB is planted with a larger footprint (`STUMP_TOP_RADIUS≈0.60`),
+removed). Each GLB is planted with a larger footprint (`STUMP_TOP_RADIUS≈0.72`),
 preferring uniform scale; the body is clipped to `STUMP_HEIGHT` and capped with an
 opaque end-grain sawn cut face (planar UVs) so the choppable log sits flush —
 not naive Y-band squash, and not a floating translucent seating pad.

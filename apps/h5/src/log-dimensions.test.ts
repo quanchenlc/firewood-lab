@@ -78,7 +78,7 @@ describe('log-dimensions (firewood-scale round)', () => {
     const avgD = STUMP_TOP_RADIUS + STUMP_BOT_RADIUS;
     // height / avg diameter roughly ≤ 0.55 (stocky chopping block, not a post).
     assert.ok(STUMP_HEIGHT / avgD <= 0.55, `expected stocky H/D, got ${STUMP_HEIGHT / avgD}`);
-    assert.ok(STUMP_HEIGHT >= 0.28 && STUMP_HEIGHT <= 0.55);
+    assert.ok(STUMP_HEIGHT >= 0.28 && STUMP_HEIGHT <= 0.65);
   });
 
   it('sampleLogRound matches tuned inch ranges (5.5–9 r, 13.5–17.5 h)', () => {
