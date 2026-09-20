@@ -13,13 +13,13 @@ import {
   type ChopOutcome,
   type Species,
 } from '@firewood/game-core';
-import { axes, species } from '@firewood/content';
+import { axes, pickRandomStump, species, stumps } from '@firewood/content';
 import {
   chopPlaybackJitter,
   createH5Platform,
   H5Audio,
 } from '@firewood/platform';
-import { preloadContentAssets } from './assets';
+import { plantChoppingStump, preloadContentAssets } from './assets';
 import { assetUrl } from './asset-url';
 import { DEBUG_DIRECT_CHOP, forceBarEnabled } from './debug-flags';
 import { detectWeakDevice } from './fracture-world';
@@ -48,14 +48,19 @@ const loaderLabel = document.querySelector<HTMLParagraphElement>('#loader-label'
 const phaseHint = document.querySelector<HTMLParagraphElement>('#phase-hint')!;
 const speciesSelect = document.querySelector<HTMLSelectElement>('#species')!;
 const axeSelect = document.querySelector<HTMLSelectElement>('#axe')!;
+const stumpSelect = document.querySelector<HTMLSelectElement>('#stump')!;
 const speciesChip = document.querySelector<HTMLDivElement>('#species-chip')!;
 const axeChip = document.querySelector<HTMLDivElement>('#axe-chip')!;
+const stumpChip = document.querySelector<HTMLDivElement>('#stump-chip')!;
 const speciesChipBtn = document.querySelector<HTMLButtonElement>('#species-chip-btn')!;
 const axeChipBtn = document.querySelector<HTMLButtonElement>('#axe-chip-btn')!;
+const stumpChipBtn = document.querySelector<HTMLButtonElement>('#stump-chip-btn')!;
 const speciesPanel = document.querySelector<HTMLDivElement>('#species-panel')!;
 const axePanel = document.querySelector<HTMLDivElement>('#axe-panel')!;
+const stumpPanel = document.querySelector<HTMLDivElement>('#stump-panel')!;
 const speciesChipLabel = document.querySelector<HTMLSpanElement>('#species-chip-label')!;
 const axeChipLabel = document.querySelector<HTMLSpanElement>('#axe-chip-label')!;
+const stumpChipLabel = document.querySelector<HTMLSpanElement>('#stump-chip-label')!;
 const powerPanel = document.querySelector<HTMLDivElement>('#power-panel')!;
 const rhythmKnob = document.querySelector<HTMLDivElement>('#rhythm-knob')!;
 const sweetZone = document.querySelector<HTMLDivElement>('#sweet-zone')!;
@@ -92,8 +97,15 @@ for (const a of axes) {
   opt.textContent = a.name;
   axeSelect.append(opt);
 }
+for (const s of stumps) {
+  const opt = document.createElement('option');
+  opt.value = s.id;
+  opt.textContent = s.name;
+  stumpSelect.append(opt);
+}
 speciesSelect.value = 'toona';
 axeSelect.value = 'camp-axe';
+stumpSelect.value = stumps[0]?.id ?? '';
 
 function setLoader(ratio: number, label: string): void {
   loaderFill.style.width = `${Math.round(ratio * 100)}%`;
@@ -109,6 +121,7 @@ function setChipOpen(chip: HTMLElement, panel: HTMLElement, btn: HTMLButtonEleme
 function closeChips(): void {
   setChipOpen(speciesChip, speciesPanel, speciesChipBtn, false);
   setChipOpen(axeChip, axePanel, axeChipBtn, false);
+  setChipOpen(stumpChip, stumpPanel, stumpChipBtn, false);
 }
 
 function syncMuteUi(): void {
@@ -134,7 +147,16 @@ async function boot(): Promise<void> {
   setLoader(0.02, '加载环境音与斧声…');
   await audio.preload();
 
-  const preloaded = await preloadContentAssets(species, axes, setLoader);
+  const initialStump =
+    stumps.find((s) => s.id === platform.storage.getItem('firewood.h5.stump')) ??
+    pickRandomStump();
+  stumpSelect.value = initialStump.id;
+
+  const preloaded = await preloadContentAssets(species, axes, setLoader, {
+    stumpModel: initialStump.model,
+    stumpPackId: initialStump.id,
+    warmStumpModels: stumps.map((s) => s.model),
+  });
   const logScene = createLogScene(canvas, preloaded.choppingBlock, {
     weakDevice,
     yard: preloaded.yard,
@@ -163,6 +185,7 @@ async function boot(): Promise<void> {
   let roundFinishing = false;
   let lastOutcome: ChopOutcome | null = null;
   let speciesBusy = false;
+  let stumpBusy = false;
   let tabHidden = typeof document !== 'undefined' && document.hidden;
   let lockedSlider01 = 0.5;
   let rhythm01 = 0.5;
@@ -191,6 +214,7 @@ async function boot(): Promise<void> {
   function refreshChipLabels(): void {
     speciesChipLabel.textContent = currentSpecies().name;
     axeChipLabel.textContent = currentAxe().name;
+    stumpChipLabel.textContent = currentStump().name;
   }
 
   function setPhase(next: Phase): void {
@@ -572,6 +596,17 @@ async function boot(): Promise<void> {
     }, 720);
   }
 
+  async function applyStumpPack(packId: string, opts?: { persist?: boolean }): Promise<void> {
+    const pack = stumps.find((s) => s.id === packId) ?? stumps[0]!;
+    stumpSelect.value = pack.id;
+    if (opts?.persist !== false) {
+      platform.storage.setItem('firewood.h5.stump', pack.id);
+    }
+    refreshChipLabels();
+    const planted = await plantChoppingStump(pack.model, { packId: pack.id });
+    logScene.setChoppingStump(planted);
+  }
+
   function resetRound(opts?: { keepPile?: boolean }): void {
     clearChopTimers();
     chopping = false;
@@ -591,6 +626,11 @@ async function boot(): Promise<void> {
       logScene.resetLog({ keepPile: true });
     }
     void logScene.setSpecies(currentSpecies());
+    // Fresh stump each full round for visual variety (keepPile = mid-round recycle).
+    if (!opts?.keepPile && stumps.length > 1) {
+      const next = pickRandomStump(currentStump().id);
+      void applyStumpPack(next.id, { persist: false }).catch((err) => console.error(err));
+    }
     setPhase('aim');
   }
 
@@ -598,16 +638,26 @@ async function boot(): Promise<void> {
     e.stopPropagation();
     const open = speciesChip.dataset.open !== 'true';
     setChipOpen(axeChip, axePanel, axeChipBtn, false);
+    setChipOpen(stumpChip, stumpPanel, stumpChipBtn, false);
     setChipOpen(speciesChip, speciesPanel, speciesChipBtn, open);
   });
   axeChipBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const open = axeChip.dataset.open !== 'true';
     setChipOpen(speciesChip, speciesPanel, speciesChipBtn, false);
+    setChipOpen(stumpChip, stumpPanel, stumpChipBtn, false);
     setChipOpen(axeChip, axePanel, axeChipBtn, open);
+  });
+  stumpChipBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = stumpChip.dataset.open !== 'true';
+    setChipOpen(speciesChip, speciesPanel, speciesChipBtn, false);
+    setChipOpen(axeChip, axePanel, axeChipBtn, false);
+    setChipOpen(stumpChip, stumpPanel, stumpChipBtn, open);
   });
   speciesPanel.addEventListener('click', (e) => e.stopPropagation());
   axePanel.addEventListener('click', (e) => e.stopPropagation());
+  stumpPanel.addEventListener('click', (e) => e.stopPropagation());
 
   speciesSelect.addEventListener('change', () => {
     if (speciesBusy) return;
@@ -630,6 +680,16 @@ async function boot(): Promise<void> {
     logScene.setAxeVisual(preloaded.axes.get(axe.id) ?? null);
     refreshChipLabels();
     updateForceUi();
+  });
+
+  stumpSelect.addEventListener('change', () => {
+    if (stumpBusy) return;
+    stumpBusy = true;
+    void applyStumpPack(stumpSelect.value)
+      .catch((err) => console.error(err))
+      .finally(() => {
+        stumpBusy = false;
+      });
   });
 
   // Second click: confirm chop from the rhythm dock (or anywhere else in power).
@@ -952,7 +1012,7 @@ async function boot(): Promise<void> {
       for (const f of logScene.fracture.fragments) f.mesh.visible = false;
       return true;
     },
-    /** Debug: world pose of each fragment (radial = hypot(x,z); stump top R≈0.34). */
+    /** Debug: world pose of each fragment (radial = hypot(x,z); stump top R≈0.48). */
     fragmentPoses: () =>
       logScene.fracture.fragments.map((f) => {
         const x = f.body.position.x;
@@ -1268,6 +1328,10 @@ function currentSpecies(): Species {
 
 function currentAxe(): Axe {
   return axes.find((a) => a.id === axeSelect.value) ?? axes[0]!;
+}
+
+function currentStump() {
+  return stumps.find((s) => s.id === stumpSelect.value) ?? stumps[0]!;
 }
 
 void boot().catch((err) => {

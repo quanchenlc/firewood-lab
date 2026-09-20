@@ -50,9 +50,11 @@ apps/h5/                 # Vite + Three.js H5 壳（public/assets 静态资源�
 apps/wechat-game/        # 微信小游戏占位（仅 README）
 packages/game-core/      # resolveChop、planFracture — 无 DOM
 packages/platform/       # 平台接口 + H5 stub
-packages/content/        # species.json / axes.json（含 maps、model、attribution）
+packages/content/        # species.json / axes.json / stumps.json（含 maps、model、attribution）
 scripts/pull-assets.mjs  # 从 Poly Haven API 拉取 1K 贴图与 GLTF
 ```
+
+玩法补充：左侧 **墩** 芯片可切换 5 套 CC0 劈柴墩；每开新一轮也会随机换墩。墩足径加大，顶面有水平木色承台，原木贴合落座。
 
 ## 资源与许可
 
@@ -69,7 +71,7 @@ scripts/pull-assets.mjs  # 从 Poly Haven API 拉取 1K 贴图与 GLTF
 | 用途 | 来源 | 许可 |
 |------|------|------|
 | 6 种树皮 PBR（diff/nor/rough 1K） | Poly Haven bark packs | CC0 |
-| 劈柴台扫描 GLB `log_chopping_stump` | Blendkit「Log Chopping Stump 2」（Joshua Whitney） | CC0 |
+| 劈柴墩 GLB 包（5 套，可切换 / 每轮随机） | Blendkit CC0 scans（见 ATTRIBUTION） | CC0 |
 | 斧头 GLTF（hatchet / wooden_axe / wooden_axe_03 / sledgehammer_01） | Poly Haven | CC0 |
 | 地面 `forest_ground_04` | Poly Haven | CC0 |
 | 天空 HDRI `kloofendal_48d_partly_cloudy_puresky`（1K HDR + 2K JPG） | Poly Haven | CC0 |
