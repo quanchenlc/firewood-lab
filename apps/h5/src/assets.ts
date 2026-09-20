@@ -202,33 +202,69 @@ export function normalizeModel(root: THREE.Object3D, maxSize: number): THREE.Obj
 }
 
 /**
- * Chopping-block stump (劈柴台): scanned flat-top chopping stump GLB.
- * Prefer Blendkit CC0 “Log Chopping Stump” family — not Poly Haven’s root mound.
+ * Chopping-block stump (劈柴台): scanned CC0 stump GLB packs.
+ * Prefer real chopping-block / cut-log photogrammetry — never screen.toys assets.
  */
 export interface PlantedStump {
   root: THREE.Object3D;
-  /** World Y of the flat chopping face. */
+  /** World Y of the flat chopping face (horizontal seating plane). */
   topY: number;
   /** Approximate top radius for physics / yard layout. */
   topRadius: number;
   /** Visual stump height after planting. */
   height: number;
+  /** Content pack id when known. */
+  packId?: string;
 }
 
-/** Scanned CC0 chopping stump (Blendkit Log Chopping Stump 2, 1K PBR). */
+/** Default scanned CC0 chopping stump (Blendkit Log Chopping Stump 2). */
 export const CHOPPING_STUMP_GLB = 'assets/models/stump/log_chopping_stump.glb';
 
 /**
- * Load + plant the scanned chopping stump under the log.
+ * Subtle horizontal seating plane so the choppable log rests flush.
+ * Warm end-grain map + high roughness — not a bright plastic disc.
+ */
+async function makeSeatingDisc(radius: number): Promise<THREE.Mesh> {
+  const endMap = await loadTexture('assets/endgrain/toona.png', THREE.SRGBColorSpace).catch(
+    () => null,
+  );
+  if (endMap) {
+    endMap.wrapS = endMap.wrapT = THREE.ClampToEdgeWrapping;
+    endMap.repeat.set(1, 1);
+  }
+  const mat = new THREE.MeshStandardMaterial({
+    map: endMap ?? undefined,
+    // Dusty sawn wood — slightly darker than bare endgrain so it nests into bark.
+    color: endMap ? 0xd8c4a0 : 0xa88b62,
+    roughness: 0.97,
+    metalness: 0,
+    // Soften so the disc reads as wood, not a UI chip.
+    transparent: true,
+    opacity: 0.92,
+    depthWrite: true,
+  });
+  // Thin cylinder (not a zero-thickness plane) so contact shadows stay readable.
+  const geo = new THREE.CylinderGeometry(radius, radius * 0.98, 0.012, 48, 1, false);
+  const disc = new THREE.Mesh(geo, mat);
+  disc.name = 'chopping-block-seat';
+  disc.castShadow = false;
+  disc.receiveShadow = true;
+  return disc;
+}
+
+/**
+ * Load + plant a scanned chopping stump under the log.
  * Scales so top height ≈ STUMP_HEIGHT and plan radius ≈ STUMP_TOP_RADIUS
- * (mild non-uniform OK — keeps prior rest Y and log seating).
+ * (larger footprint than the prior 0.34 m top), then adds a level seating face.
  */
 export async function plantChoppingStump(
   url: string = CHOPPING_STUMP_GLB,
+  opts?: { packId?: string },
 ): Promise<PlantedStump> {
   const model = await loadGltf(url);
   const root = new THREE.Group();
   root.name = 'chopping-block';
+  if (opts?.packId) root.userData.packId = opts.packId;
 
   // Natural size before planting (glTF Y-up).
   model.updateMatrixWorld(true);
@@ -237,7 +273,7 @@ export async function plantChoppingStump(
   const h = Math.max(natSize.y, 1e-4);
   const halfXZ = 0.5 * Math.max(natSize.x, natSize.z, 1e-4);
 
-  // Hit prior stump top Y + seating radius used by log / collider.
+  // Hit stump top Y + seating radius used by log / collider (larger footprint).
   const scaleY = STUMP_HEIGHT / h;
   const scaleXZ = STUMP_TOP_RADIUS / halfXZ;
   model.scale.set(scaleXZ, scaleY, scaleXZ);
@@ -275,16 +311,35 @@ export async function plantChoppingStump(
   root.add(model);
   root.updateMatrixWorld(true);
   const planted = new THREE.Box3().setFromObject(root);
-  const topY = planted.max.y;
+  // Sink irregular peaks a few mm under the seating plane so the log sits flush.
+  const seatY = STUMP_HEIGHT;
+  const peak = planted.max.y;
+  if (peak > seatY + 0.002) {
+    model.position.y -= peak - seatY + 0.004;
+  }
+
+  const seat = await makeSeatingDisc(STUMP_TOP_RADIUS * 0.92);
+  seat.position.y = seatY - 0.006;
+  root.add(seat);
+
+  root.updateMatrixWorld(true);
+  const finalBox = new THREE.Box3().setFromObject(root);
+  const topY = seatY;
   const topRadius = Math.max(
-    Math.abs(planted.min.x),
-    Math.abs(planted.max.x),
-    Math.abs(planted.min.z),
-    Math.abs(planted.max.z),
-    STUMP_TOP_RADIUS * 0.9,
+    Math.abs(finalBox.min.x),
+    Math.abs(finalBox.max.x),
+    Math.abs(finalBox.min.z),
+    Math.abs(finalBox.max.z),
+    STUMP_TOP_RADIUS * 0.95,
   );
 
-  return { root, topY, topRadius, height: Math.max(topY - planted.min.y, STUMP_HEIGHT * 0.9) };
+  return {
+    root,
+    topY,
+    topRadius,
+    height: Math.max(topY - finalBox.min.y, STUMP_HEIGHT * 0.9),
+    packId: opts?.packId,
+  };
 }
 
 /** @deprecated Use plantChoppingStump — kept as a thin alias for call sites. */
@@ -293,6 +348,25 @@ export async function buildChoppingBlock(
 ): Promise<PlantedStump> {
   return plantChoppingStump();
 }
+
+function disposeObject3D(root: THREE.Object3D): void {
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.geometry?.dispose();
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) {
+      const std = mat as THREE.MeshStandardMaterial;
+      std.map?.dispose();
+      std.normalMap?.dispose();
+      std.roughnessMap?.dispose();
+      std.aoMap?.dispose();
+      std.dispose?.();
+    }
+  });
+}
+
+export { disposeObject3D };
 
 /** Lean outdoor ground + daytime sky (Poly Haven CC0, mobile-friendly). */
 export interface YardTextures {
@@ -339,6 +413,12 @@ export async function preloadContentAssets(
   speciesList: Species[],
   axesList: Axe[],
   onProgress: ProgressFn,
+  opts?: {
+    stumpModel?: string;
+    stumpPackId?: string;
+    /** Warm additional stump pack GLBs in parallel (lazy swap later). */
+    warmStumpModels?: string[];
+  },
 ): Promise<{
   choppingBlock: PlantedStump;
   axes: Map<string, THREE.Group>;
@@ -351,8 +431,20 @@ export async function preloadContentAssets(
 
   tasks.push(async () => {
     onProgress(0.05, '劈柴台…');
-    choppingBlock = await plantChoppingStump();
+    choppingBlock = await plantChoppingStump(opts?.stumpModel ?? CHOPPING_STUMP_GLB, {
+      packId: opts?.stumpPackId,
+    });
   });
+
+  if (opts?.warmStumpModels?.length) {
+    for (const url of opts.warmStumpModels) {
+      if (url === (opts?.stumpModel ?? CHOPPING_STUMP_GLB)) continue;
+      tasks.push(async () => {
+        // Touch-load so pack switches feel instant.
+        await loadGltf(url).catch(() => null);
+      });
+    }
+  }
 
   tasks.push(async () => {
     onProgress(0.12, '地面与天空…');

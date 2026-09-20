@@ -8,6 +8,7 @@ import {
   type Species,
 } from '@firewood/game-core';
 import {
+  disposeObject3D,
   loadSpeciesMaterials,
   type PlantedStump,
   type SpeciesMaterials,
@@ -70,6 +71,8 @@ export interface LogScene {
     handleDotUp: number;
   };
   resetLog(opts?: { keepPile?: boolean }): void;
+  /** Swap the visual + collider chopping stump (pack switch / per-round random). */
+  setChoppingStump(next: PlantedStump): void;
   /** Current upright-round dims (metres + bark seed). */
   getRoundDims(): LogRoundDims;
   setSpecies(species: Species): Promise<void>;
@@ -339,11 +342,11 @@ export function createLogScene(
 
   // Hierarchy: ground → stump chopping block (flat cut top) → upright round on face.
   // Stump sits directly on the yard texture (no packed-earth pad blob).
-  const planted = choppingBlock;
-  const stump = planted.root;
+  let planted = choppingBlock;
+  let stump = planted.root;
   scene.add(stump);
   stump.updateMatrixWorld(true);
-  const stumpTopY = planted.topY;
+  let stumpTopY = planted.topY;
   let logCenterY = stumpTopY + roundDims.height * 0.5 + 0.002;
   lookAt.y = camLookAtY(roundDims, stumpTopY);
 
@@ -598,6 +601,29 @@ export function createLogScene(
     fracture.disposeMesh(logMesh);
     logMesh = createLogProxy(true);
     scene.add(logMesh);
+  }
+
+  /** Replace chopping stump mesh + refresh support Y / collider / log seat. */
+  function setChoppingStump(next: PlantedStump): void {
+    if (stump.parent) stump.removeFromParent();
+    disposeObject3D(stump);
+    planted = next;
+    stump = next.root;
+    scene.add(stump);
+    stump.updateMatrixWorld(true);
+    stumpTopY = next.topY;
+    fracture.setStumpSupportY(stumpTopY);
+    fracture.fitStumpCollider({
+      topY: stumpTopY,
+      height: next.height,
+      radius: next.topRadius,
+    });
+    // Keep the upright round flush on the new seating plane.
+    if (logMesh.parent && logMesh.userData.role === 'log') {
+      logCenterY = stumpTopY + roundDims.height * 0.5 + 0.002;
+      logMesh.position.y = logCenterY;
+      lookAt.y = camLookAtY(roundDims, stumpTopY);
+    }
   }
 
   async function setSpecies(species: Species): Promise<void> {
@@ -866,6 +892,7 @@ export function createLogScene(
     playNick,
     fractureAt,
     resetLog,
+    setChoppingStump,
     getRoundDims: () => ({ ...roundDims }),
     setSpecies,
     setAxeVisual,

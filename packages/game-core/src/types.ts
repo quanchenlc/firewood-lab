@@ -48,3 +48,12 @@ export interface Axe {
   model?: string;
   attribution?: Record<string, string>;
 }
+
+/** CC0 chopping-stump visual pack (H5 GLB + attribution). */
+export interface StumpPack {
+  id: string;
+  name: string;
+  /** Public GLB/GLTF URL under assets/. */
+  model: string;
+  attribution?: Record<string, string>;
+}

@@ -3,7 +3,7 @@
  */
 
 export type { ChopOutcome } from './chop-types.ts';
-export type { Axe, Species } from './types.ts';
+export type { Axe, Species, StumpPack } from './types.ts';
 export {
   resolveChop,
   getSweetSliderRange,

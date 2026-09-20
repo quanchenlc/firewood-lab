@@ -297,9 +297,9 @@ export function createFractureWorld(
   // Pinata cut UVs are replaced in repairCutFace with aspect-correct projection.
   sliceOpts.textureScale.set(1, 1);
   /** World Y of the chopping-block top — measured from the visual stump mesh. */
-  let stumpSupportY = opts?.stumpSupportY ?? 0.34;
+  let stumpSupportY = opts?.stumpSupportY ?? 0.36;
   /** Visual stump top radius — tip-drop hinge soft-clamps toward this lip. */
-  let stumpLipRadius = opts?.stumpRadius ?? 0.34;
+  let stumpLipRadius = opts?.stumpRadius ?? 0.48;
 
   /**
    * Firewood exit feel — Option B stump-lip hinge tip onto nearby yard ground
@@ -334,8 +334,8 @@ export function createFractureWorld(
 
   fitStumpCollider({
     topY: stumpSupportY,
-    height: opts?.stumpHeight ?? 0.34,
-    radius: opts?.stumpRadius ?? 0.34,
+    height: opts?.stumpHeight ?? 0.36,
+    radius: opts?.stumpRadius ?? 0.48,
   });
 
   const _tiltQ = new THREE.Quaternion();
