@@ -8,31 +8,19 @@
       "author": "Joshua Whitney",
       "url": "https://www.blendkit.com/asset-gallery-detail/4c96d1bb-8505-4987-b024-5d7e7c233f47/",
       "license": "CC0",
-      "note": "Photogrammetry chopping block (flat-top family)."
+      "note": "Photogrammetry chopping block (upright flat-top family)."
     }
   },
   {
-    "id": "cut-log-04",
+    "id": "cut-log",
     "name": "横切原木墩",
-    "model": "assets/models/stump/cut_log_04.glb",
+    "model": "assets/models/stump/cut_log.glb",
     "attribution": {
-      "asset": "Cut log 04 - remeshed photoscan",
+      "asset": "Cut log - remeshed photoscan",
       "author": "Joshua Whitney",
-      "url": "https://www.blendkit.com/asset-gallery-detail/5e38a2c9-32c1-46aa-bee3-9da992fb3935/",
+      "url": "https://www.blendkit.com/asset-gallery-detail/96e27b5d-414c-49ae-8946-ed787c9fffb2/",
       "license": "CC0",
-      "note": "Photoscanned cut log, upright as chopping block."
-    }
-  },
-  {
-    "id": "pine-stump",
-    "name": "松树桩",
-    "model": "assets/models/stump/pine_stump.glb",
-    "attribution": {
-      "asset": "Pine Stump",
-      "author": "pbrpx",
-      "url": "https://www.blendkit.com/asset-gallery-detail/33dcdb54-b5c2-4c9e-a112-cbdb9d73eb18/",
-      "license": "CC0",
-      "note": "Free CC0 pine stump scan with cut top."
+      "note": "Upright remeshed cut log; in-engine sawn endgrain top."
     }
   },
   {
@@ -41,22 +29,10 @@
     "model": "assets/models/stump/freepoly_stump.glb",
     "attribution": {
       "asset": "Scan Tree stump-Freepoly.org",
-    "author": "Free poly",
-    "url": "https://www.blendkit.com/asset-gallery-detail/75bf2741-83c3-4a7d-888e-574868b1bac2/",
+      "author": "Free poly",
+      "url": "https://www.blendkit.com/asset-gallery-detail/75bf2741-83c3-4a7d-888e-574868b1bac2/",
       "license": "CC0",
-      "note": "CC0 photogrammetry stump redistributed via Blendkit."
-    }
-  },
-  {
-    "id": "pine-tree-stump-02",
-    "name": "松树桩 02",
-    "model": "assets/models/stump/pine_tree_stump_02.glb",
-    "attribution": {
-      "asset": "Pine Tree Stump 02",
-      "author": "Joshua Whitney",
-      "url": "https://www.blendkit.com/asset-gallery-detail/33f6b65c-6ac0-4306-bbe7-5019f62d80ab/",
-      "license": "CC0",
-      "note": "Photoscanned pine stump; mesh top flattened to a horizontal cut in-engine."
+      "note": "CC0 photogrammetry stump redistributed via Blendkit; strong cut top."
     }
   }
 ]
