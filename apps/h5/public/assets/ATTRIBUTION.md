@@ -47,8 +47,9 @@ no ×1.18 wash). Shared fallback: `facegrain/barkedge_{diff,nor}.jpg` (= toona p
 
 Chopping stump packs (all **CC0**, listed in `packages/content/data/stumps.json`):
 H5 left-edge **墩** chip cycles packs; each full round also auto-picks a random pack.
-Each GLB is planted with a larger footprint (`STUMP_TOP_RADIUS≈0.48`) and a subtle
-horizontal wood seating disc so the choppable log sits flush (no bright plastic look).
+Each GLB is planted with a larger footprint (`STUMP_TOP_RADIUS≈0.48`). The mesh's own
+top band is flattened in-engine into a horizontal cut plane so the choppable log sits
+flush — no separate seating pad/disc (idea only; never proprietary meshes).
 **Never** use screen.toys `stump_v02` or any proprietary mesh.
 
 Preferred sibling [Log Chopping Stump](https://www.blendkit.com/asset-gallery-detail/8b03e756-72cb-4cd6-b35c-e7832beaccf7/)
