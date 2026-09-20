@@ -17,7 +17,7 @@
  * the random range — workable with FIREWOOD_VOL_ABS_MIN=250 / FIREWOOD_VOL_MAX=500
  * (thresholds unchanged). Mid defaults keep framing close to the prior fixed round.
  *
- * Visual retune vs stockier stump (STUMP_* ≈ 0.60/0.70/0.45, ~+25% vs 0.48/0.56/0.36):
+ * Visual retune vs stockier stump (STUMP_* ≈ 0.72/0.84/0.54, ~+20% vs 0.60/0.70/0.45):
  * inch ranges sit a modest ~12–15% above the pure reference so the round reads
  * larger on the block (stump outline noise also fattens the visual top), while
  * max bot radius (+ bark) still seats inside the stump top with margin.
@@ -57,12 +57,12 @@ export const LOG_RADIUS_TOP = LOG_RADIUS_BOT * 0.92;
  * Flat-top chopping block under the round (noticeably wider footprint than max log).
  * Stockier silhouette: height ≈ half average diameter, top a bit narrower than bottom
  * (feel toward a real chopping stump — not 1:1 with any proprietary ref mesh).
- * Uniform ~+25% vs prior 0.48/0.56/0.36 so the bottom stump reads larger under the log
+ * Uniform ~+20% vs prior 0.60/0.70/0.45 so the bottom stump reads larger under the log
  * without anisotropic squash into a mound.
  */
-export const STUMP_TOP_RADIUS = 0.6;
-export const STUMP_BOT_RADIUS = 0.7;
-export const STUMP_HEIGHT = 0.45;
+export const STUMP_TOP_RADIUS = 0.72;
+export const STUMP_BOT_RADIUS = 0.84;
+export const STUMP_HEIGHT = 0.54;
 
 /** Orbit look-at Y ≈ stump top + half default log height. */
 export const CAM_LOOK_AT_Y = STUMP_HEIGHT + LOG_HEIGHT * 0.5;
