@@ -897,7 +897,7 @@ async function boot(): Promise<void> {
       });
     },
     /** Debug: hide decorative InstancedMesh yard debris (screenshot clarity). */
-    /** Debug: chopping-block child meshes (expect one closed CylinderGeometry). */
+    /** Debug: chopping-block child meshes (scanned BufferGeometry stump). */
     dumpChoppingBlock: () => {
       const out: Array<{
         name: string;

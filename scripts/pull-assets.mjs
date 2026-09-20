@@ -28,7 +28,6 @@ const BARK = [
 ];
 
 const MODELS = [
-  { id: 'tree_stump_02', dir: 'models/stump' },
   { id: 'hatchet', dir: 'models/axes/hand-axe' },
   { id: 'wooden_axe', dir: 'models/axes/nordic-splitting-axe' },
   { id: 'wooden_axe_03', dir: 'models/axes/camp-axe' },
