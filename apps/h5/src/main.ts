@@ -1012,7 +1012,7 @@ async function boot(): Promise<void> {
       for (const f of logScene.fracture.fragments) f.mesh.visible = false;
       return true;
     },
-    /** Debug: world pose of each fragment (radial = hypot(x,z); stump top R≈0.72). */
+    /** Debug: world pose of each fragment (radial = hypot(x,z); stump top R≈0.97). */
     fragmentPoses: () =>
       logScene.fracture.fragments.map((f) => {
         const x = f.body.position.x;
