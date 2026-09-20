@@ -256,16 +256,21 @@ export async function plantChoppingStump(
   const h = Math.max(natSize.y, 1e-4);
   const halfXZ = 0.5 * Math.max(natSize.x, natSize.z, 1e-4);
 
-  // Prefer uniform scale; honor larger footprint; avoid extreme Y-squash.
+  // Prefer near-uniform scale. Honor larger footprint when it doesn't crush
+  // height into a pancake (clipping a footprint-scaled tall mesh → mound).
   const scaleR = STUMP_TOP_RADIUS / halfXZ;
   const scaleH = STUMP_HEIGHT / h;
-  const aniso = scaleR / scaleH;
+  const maxAniso = 1.22;
   let scaleXZ = scaleR;
   let scaleY = scaleH;
-  if (aniso > 1.3 || aniso < 0.75) {
-    // Extreme mismatch → uniform to footprint, cut face sets seating height.
+  const ratio = scaleXZ / scaleY;
+  if (ratio > maxAniso) {
+    // Footprint wants more stretch than height — keep height, widen mildly.
+    scaleY = scaleH;
+    scaleXZ = scaleH * maxAniso;
+  } else if (ratio < 1 / maxAniso) {
     scaleXZ = scaleR;
-    scaleY = scaleR;
+    scaleY = scaleR * maxAniso;
   }
   model.scale.set(scaleXZ, scaleY, scaleXZ);
   model.updateMatrixWorld(true);
@@ -275,19 +280,6 @@ export async function plantChoppingStump(
   model.position.x -= (box.min.x + box.max.x) * 0.5;
   model.position.z -= (box.min.z + box.max.z) * 0.5;
   model.position.y -= box.min.y;
-
-  // If uniform footprint scale left the mesh short of seating height, lift with
-  // a mild Y stretch (capped) so the cut plane can sit at STUMP_HEIGHT.
-  model.updateMatrixWorld(true);
-  const after = new THREE.Box3().setFromObject(model);
-  const plantedH = Math.max(after.max.y - after.min.y, 1e-4);
-  if (plantedH < STUMP_HEIGHT * 0.92) {
-    const boost = Math.min(STUMP_HEIGHT / plantedH, 1.3);
-    model.scale.y *= boost;
-    model.updateMatrixWorld(true);
-    const b2 = new THREE.Box3().setFromObject(model);
-    model.position.y -= b2.min.y;
-  }
 
   model.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
@@ -316,15 +308,26 @@ export async function plantChoppingStump(
   root.updateMatrixWorld(true);
 
   const topY = STUMP_HEIGHT;
-  const endMap = await loadTexture('assets/endgrain/toona.png', THREE.SRGBColorSpace).catch(
-    () => null,
+  // Sink the whole irregular crown under the cut face so the sawn disc reads as
+  // the stump's own top (no hovering lid over jagged bark peaks).
+  const plantedBox = new THREE.Box3().setFromObject(root);
+  const peak = plantedBox.max.y;
+  const sinkTarget = topY - 0.014;
+  if (peak > sinkTarget) {
+    model.position.y -= peak - sinkTarget;
+    root.updateMatrixWorld(true);
+  }
+
+  const endMap = await loadTexture('assets/endgrain/pinus.png', THREE.SRGBColorSpace).catch(
+    () =>
+      loadTexture('assets/endgrain/toona.png', THREE.SRGBColorSpace).catch(() => null),
   );
   if (endMap) {
     endMap.wrapS = endMap.wrapT = THREE.ClampToEdgeWrapping;
   }
   applyStumpSawnTop(root, topY, endMap, {
-    minRadius: STUMP_TOP_RADIUS * 0.72,
-    radiusScale: 0.94,
+    minRadius: 0.22,
+    radiusScale: 0.96,
   });
 
   root.updateMatrixWorld(true);

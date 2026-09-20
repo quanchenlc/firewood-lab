@@ -195,9 +195,9 @@ export function makeSawnCutFace(
   }
   const mat = new THREE.MeshStandardMaterial({
     ...(map ? { map } : {}),
-    // Dusty sawn wood nested in bark — opaque (not the #40 plastic pad).
-    color: map ? 0xcbb892 : 0xa88b62,
-    roughness: 0.96,
+    // Weathered chopping-block face — muted multiply so rings read as wood.
+    color: map ? 0x6e5738 : 0x5c4a32,
+    roughness: 0.99,
     metalness: 0,
     side: THREE.DoubleSide,
     polygonOffset: true,
@@ -205,8 +205,8 @@ export function makeSawnCutFace(
     polygonOffsetUnits: -1,
   });
 
-  // Thin solid disc so contact shadows read; top face is the seating plane.
-  const geo = new THREE.CylinderGeometry(radius, radius * 0.995, 0.01, 48, 1, false);
+  // Very thin disc; visually the stump's own cut, not a thick pad.
+  const geo = new THREE.CylinderGeometry(radius, radius * 0.99, 0.006, 48, 1, false);
   // Planar UVs on the top cap already come from CylinderGeometry; reinforce
   // ring-centered mapping so endgrain bullseye sits on the cut face.
   const uv = geo.getAttribute('uv') as THREE.BufferAttribute;
@@ -252,15 +252,15 @@ export function applyStumpSawnTop(
     for (const m of mats) (m as THREE.Material)?.dispose?.();
   }
 
-  const clipped = clipStumpBodyToCutPlane(root, topY);
-  const measured = measureStumpTopRadius(root, topY);
-  const minR = opts?.minRadius ?? 0.28;
-  const scale = opts?.radiusScale ?? 0.94;
+  const clipped = clipStumpBodyToCutPlane(root, topY, { inset: 0.002 });
+  const measured = measureStumpTopRadius(root, topY, { band: 0.05 });
+  const minR = opts?.minRadius ?? 0.22;
+  const scale = opts?.radiusScale ?? 0.96;
   const radius = Math.max(minR, measured * scale);
 
   const face = makeSawnCutFace(radius, endMap);
   // Flush: disc center slightly below topY so the top surface == topY.
-  face.position.y = topY - 0.005;
+  face.position.y = topY - 0.004;
   root.add(face);
   root.updateMatrixWorld(true);
   return { clipped, radius };
