@@ -147,9 +147,10 @@ async function boot(): Promise<void> {
   setLoader(0.02, '加载环境音与斧声…');
   await audio.preload();
 
+  // Stored preference, else stumps[0] (雪地劈柴墩). Round resets still randomize.
   const initialStump =
     stumps.find((s) => s.id === platform.storage.getItem('firewood.h5.stump')) ??
-    pickRandomStump();
+    stumps[0]!;
   stumpSelect.value = initialStump.id;
 
   const preloaded = await preloadContentAssets(species, axes, setLoader, {
