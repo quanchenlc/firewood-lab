@@ -1,6 +1,7 @@
 import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
 import { DestructibleMesh, FractureOptions, SliceOptions } from '@dgreenheck/three-pinata';
+import { STUMP_HEIGHT, STUMP_TOP_RADIUS } from './log-dimensions';
 import {
   BOUNCE_TILT_DEG,
   BOUNCE_YAW_JITTER_DEG,
@@ -297,9 +298,9 @@ export function createFractureWorld(
   // Pinata cut UVs are replaced in repairCutFace with aspect-correct projection.
   sliceOpts.textureScale.set(1, 1);
   /** World Y of the chopping-block top — measured from the visual stump mesh. */
-  let stumpSupportY = opts?.stumpSupportY ?? 0.36;
+  let stumpSupportY = opts?.stumpSupportY ?? STUMP_HEIGHT;
   /** Visual stump top radius — tip-drop hinge soft-clamps toward this lip. */
-  let stumpLipRadius = opts?.stumpRadius ?? 0.48;
+  let stumpLipRadius = opts?.stumpRadius ?? STUMP_TOP_RADIUS;
 
   /**
    * Firewood exit feel — Option B stump-lip hinge tip onto nearby yard ground
@@ -334,8 +335,8 @@ export function createFractureWorld(
 
   fitStumpCollider({
     topY: stumpSupportY,
-    height: opts?.stumpHeight ?? 0.36,
-    radius: opts?.stumpRadius ?? 0.48,
+    height: opts?.stumpHeight ?? STUMP_HEIGHT,
+    radius: opts?.stumpRadius ?? STUMP_TOP_RADIUS,
   });
 
   const _tiltQ = new THREE.Quaternion();
