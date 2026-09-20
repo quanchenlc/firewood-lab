@@ -5,7 +5,10 @@ import type { Axe, Species } from '@firewood/game-core';
 import { assetUrl } from './asset-url';
 import { SIDEGRAIN_DIFF, SIDEGRAIN_NOR, speciesInsidegrainPaths } from './cut-face';
 import { STUMP_HEIGHT, STUMP_TOP_RADIUS } from './log-dimensions';
-import { flattenStumpTopToPlane } from './stump-flat-top';
+import {
+  applyStumpSawnTop,
+  orientStumpUpright,
+} from './stump-flat-top';
 
 /** Mild albedo tint so shared bark-edge cut atlas reads per-species (keep pale). */
 const SIDEGRAIN_TINT: Record<string, number> = {
@@ -221,13 +224,18 @@ export interface PlantedStump {
 /** Default scanned CC0 chopping stump (Blendkit Log Chopping Stump 2). */
 export const CHOPPING_STUMP_GLB = 'assets/models/stump/log_chopping_stump.glb';
 
-export { flattenStumpTopToPlane } from './stump-flat-top';
+export {
+  applyStumpSawnTop,
+  flattenStumpTopToPlane,
+  orientStumpUpright,
+} from './stump-flat-top';
 
 /**
  * Load + plant a scanned chopping stump under the log.
- * Scales so top height ≈ STUMP_HEIGHT and plan radius ≈ STUMP_TOP_RADIUS
- * (larger footprint than the prior 0.34 m top), then flattens the mesh top
- * itself into a horizontal cut face for flush log seating.
+ *
+ * Option C: upright if needed → prefer uniform scale (cap mild anisotropy) →
+ * clip body to `STUMP_HEIGHT` → attach opaque end-grain sawn cut face flush
+ * with the log seating plane (not a floating #40 pad; not naive Y-squash).
  */
 export async function plantChoppingStump(
   url: string = CHOPPING_STUMP_GLB,
@@ -238,6 +246,9 @@ export async function plantChoppingStump(
   root.name = 'chopping-block';
   if (opts?.packId) root.userData.packId = opts.packId;
 
+  // Orient sideways scans so the cut face reads +Y before measuring size.
+  orientStumpUpright(model);
+
   // Natural size before planting (glTF Y-up).
   model.updateMatrixWorld(true);
   const nat = new THREE.Box3().setFromObject(model);
@@ -245,9 +256,17 @@ export async function plantChoppingStump(
   const h = Math.max(natSize.y, 1e-4);
   const halfXZ = 0.5 * Math.max(natSize.x, natSize.z, 1e-4);
 
-  // Hit stump top Y + seating radius used by log / collider (larger footprint).
-  const scaleY = STUMP_HEIGHT / h;
-  const scaleXZ = STUMP_TOP_RADIUS / halfXZ;
+  // Prefer uniform scale; honor larger footprint; avoid extreme Y-squash.
+  const scaleR = STUMP_TOP_RADIUS / halfXZ;
+  const scaleH = STUMP_HEIGHT / h;
+  const aniso = scaleR / scaleH;
+  let scaleXZ = scaleR;
+  let scaleY = scaleH;
+  if (aniso > 1.3 || aniso < 0.75) {
+    // Extreme mismatch → uniform to footprint, cut face sets seating height.
+    scaleXZ = scaleR;
+    scaleY = scaleR;
+  }
   model.scale.set(scaleXZ, scaleY, scaleXZ);
   model.updateMatrixWorld(true);
 
@@ -256,6 +275,19 @@ export async function plantChoppingStump(
   model.position.x -= (box.min.x + box.max.x) * 0.5;
   model.position.z -= (box.min.z + box.max.z) * 0.5;
   model.position.y -= box.min.y;
+
+  // If uniform footprint scale left the mesh short of seating height, lift with
+  // a mild Y stretch (capped) so the cut plane can sit at STUMP_HEIGHT.
+  model.updateMatrixWorld(true);
+  const after = new THREE.Box3().setFromObject(model);
+  const plantedH = Math.max(after.max.y - after.min.y, 1e-4);
+  if (plantedH < STUMP_HEIGHT * 0.92) {
+    const boost = Math.min(STUMP_HEIGHT / plantedH, 1.3);
+    model.scale.y *= boost;
+    model.updateMatrixWorld(true);
+    const b2 = new THREE.Box3().setFromObject(model);
+    model.position.y -= b2.min.y;
+  }
 
   model.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
@@ -266,7 +298,7 @@ export async function plantChoppingStump(
     for (const mat of mats) {
       const std = mat as THREE.MeshStandardMaterial;
       if (!std?.isMeshStandardMaterial) continue;
-      // Scanned albedo already carries bark / cut-top variation.
+      // Scanned albedo already carries bark variation.
       std.metalness = 0;
       if (std.roughness < 0.7) std.roughness = 0.85;
     }
@@ -283,9 +315,17 @@ export async function plantChoppingStump(
   root.add(model);
   root.updateMatrixWorld(true);
 
-  // Mesh top itself becomes the flat chopping plane (no separate pad/disc).
   const topY = STUMP_HEIGHT;
-  flattenStumpTopToPlane(root, topY);
+  const endMap = await loadTexture('assets/endgrain/toona.png', THREE.SRGBColorSpace).catch(
+    () => null,
+  );
+  if (endMap) {
+    endMap.wrapS = endMap.wrapT = THREE.ClampToEdgeWrapping;
+  }
+  applyStumpSawnTop(root, topY, endMap, {
+    minRadius: STUMP_TOP_RADIUS * 0.72,
+    radiusScale: 0.94,
+  });
 
   root.updateMatrixWorld(true);
   const finalBox = new THREE.Box3().setFromObject(root);

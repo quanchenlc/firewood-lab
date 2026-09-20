@@ -33,10 +33,8 @@ no ×1.18 wash). Shared fallback: `facegrain/barkedge_{diff,nor}.jpg` (= toona p
 | `facegrain/{species}/insidegrain_*.jpg` | composite: species bark L/R + kitchen_wood mid | Poly Haven (see bark + kitchen_wood) | CC0 |
 | `facegrain/barkedge_*.jpg` | legacy shared (= toona insidegrain) | same | CC0 |
 | `models/stump/log_chopping_stump.glb` | Log Chopping Stump 2 (scanned chopping block; Joshua Whitney) | https://www.blendkit.com/asset-gallery-detail/4c96d1bb-8505-4987-b024-5d7e7c233f47/ | CC0 |
-| `models/stump/cut_log_04.glb` | Cut log 04 - remeshed photoscan (Joshua Whitney) | https://www.blendkit.com/asset-gallery-detail/5e38a2c9-32c1-46aa-bee3-9da992fb3935/ | CC0 |
-| `models/stump/pine_stump.glb` | Pine Stump (PBRPX) | https://www.blendkit.com/asset-gallery-detail/33dcdb54-b5c2-4c9e-a112-cbdb9d73eb18/ | CC0 |
+| `models/stump/cut_log.glb` | Cut log - remeshed photoscan (Joshua Whitney) | https://www.blendkit.com/asset-gallery-detail/96e27b5d-414c-49ae-8946-ed787c9fffb2/ | CC0 |
 | `models/stump/freepoly_stump.glb` | Scan Tree stump-Freepoly.org (Free poly) | https://www.blendkit.com/asset-gallery-detail/75bf2741-83c3-4a7d-888e-574868b1bac2/ | CC0 |
-| `models/stump/pine_tree_stump_02.glb` | Pine Tree Stump 02 (Joshua Whitney) | https://www.blendkit.com/asset-gallery-detail/33f6b65c-6ac0-4306-bbe7-5019f62d80ab/ | CC0 |
 | `models/axes/hand-axe/*` | hatchet | https://polyhaven.com/a/hatchet | CC0 |
 | `models/axes/nordic-splitting-axe/*` | wooden_axe | https://polyhaven.com/a/wooden_axe | CC0 |
 | `models/axes/camp-axe/*` | wooden_axe_03 | https://polyhaven.com/a/wooden_axe_03 | CC0 |
@@ -47,14 +45,17 @@ no ×1.18 wash). Shared fallback: `facegrain/barkedge_{diff,nor}.jpg` (= toona p
 
 Chopping stump packs (all **CC0**, listed in `packages/content/data/stumps.json`):
 H5 left-edge **墩** chip cycles packs; each full round also auto-picks a random pack.
-Each GLB is planted with a larger footprint (`STUMP_TOP_RADIUS≈0.48`). The mesh's own
-top band is flattened in-engine into a horizontal cut plane so the choppable log sits
-flush — no separate seating pad/disc (idea only; never proprietary meshes).
+Only upright chopping-block-like scans are shipped (sideways / root-mound / thin packs
+removed). Each GLB is planted with a larger footprint (`STUMP_TOP_RADIUS≈0.48`),
+preferring uniform scale; the body is clipped to `STUMP_HEIGHT` and capped with an
+opaque end-grain sawn cut face (planar UVs) so the choppable log sits flush —
+not naive Y-band squash, and not a floating translucent seating pad.
 **Never** use screen.toys `stump_v02` or any proprietary mesh.
 
 Preferred sibling [Log Chopping Stump](https://www.blendkit.com/asset-gallery-detail/8b03e756-72cb-4cd6-b35c-e7832beaccf7/)
 is also CC0 but Full Plan on Blendkit and not redistributed here.
-Poly Haven `tree_stump_02` remains removed from the visual path (root-mound silhouette).
+Removed from the visual path: `cut_log_04` (sideways), `pine_stump` / Poly Haven
+`tree_stump_02` (root-mound / elongated top), `pine_tree_stump_02` (thin slab).
 
 ## Audio (CC0 only — no screen.toys / shapiro500 audio)
 

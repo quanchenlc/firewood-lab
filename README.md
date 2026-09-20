@@ -71,7 +71,7 @@ scripts/pull-assets.mjs  # 从 Poly Haven API 拉取 1K 贴图与 GLTF
 | 用途 | 来源 | 许可 |
 |------|------|------|
 | 6 种树皮 PBR（diff/nor/rough 1K） | Poly Haven bark packs | CC0 |
-| 劈柴墩 GLB 包（5 套，可切换 / 每轮随机） | Blendkit CC0 scans（见 ATTRIBUTION） | CC0 |
+| 劈柴墩 GLB 包（3 套直立劈柴墩，可切换 / 每轮随机） | Blendkit CC0 scans（见 ATTRIBUTION） | CC0 |
 | 斧头 GLTF（hatchet / wooden_axe / wooden_axe_03 / sledgehammer_01） | Poly Haven | CC0 |
 | 地面 `forest_ground_04` | Poly Haven | CC0 |
 | 天空 HDRI `kloofendal_48d_partly_cloudy_puresky`（1K HDR + 2K JPG） | Poly Haven | CC0 |
